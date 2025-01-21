@@ -167,6 +167,36 @@ class OllamaEmbeddings:
         return response_json["embedding"]
 
 
+class VoyageEmbedding:
+    def __init__(self, api_key: str, model: str = "voyage-3", input_type: str = "document"):
+        self.api_key = api_key
+        self.model = model
+        self.input_type = input_type
+
+    def get_text_embedding(self, text: str) -> List[float]:
+        import httpx
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+        }
+        json_data = {
+            "input": text,
+            "model": self.model,
+            "input_type": self.input_type,
+        }
+
+        with httpx.Client() as client:
+            response = client.post(
+                "https://api.voyageai.com/v1/embeddings",
+                headers=headers,
+                json=json_data,
+            )
+
+        response_json = response.json()
+        return response_json["embedding"]
+
+
 def query_embedding(embedding_model, query_text: str):
     """Generate padded embedding for querying database"""
     query_vec = embedding_model.get_text_embedding(query_text)
@@ -236,6 +266,12 @@ def embedding_model(config: EmbeddingConfig, user_id: Optional[uuid.UUID] = None
             ollama_additional_kwargs={},
         )
         return model
+
+    elif endpoint_type == "voyage":
+        return VoyageEmbedding(
+            api_key=model_settings.voyage_api_key,
+            model=config.embedding_model,
+        )
 
     else:
         raise ValueError(f"Unknown endpoint type {endpoint_type}")

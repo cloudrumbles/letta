@@ -1,0 +1,7 @@
+{
+    "embedding_endpoint_type": "voyage",
+    "embedding_endpoint": "https://api.voyageai.com/v1/embeddings",
+    "embedding_model": "voyage-3-lite",
+    "embedding_dim": 1536,
+    "embedding_chunk_size": 300
+}
