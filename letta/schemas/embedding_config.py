@@ -39,6 +39,7 @@ class EmbeddingConfig(BaseModel):
         "hugging-face",
         "mistral",
         "together",  # completions endpoint
+        "voyage",
     ] = Field(..., description="The endpoint type for the model.")
     embedding_endpoint: Optional[str] = Field(None, description="The endpoint for the model (`None` if local).")
     embedding_model: str = Field(..., description="The model for the embedding.")
@@ -69,6 +70,14 @@ class EmbeddingConfig(BaseModel):
                 embedding_dim=1024,
                 embedding_chunk_size=300,
                 embedding_endpoint_type="hugging-face",
+            )
+        elif model_name == "voyage-3-large" or model_name == "voyage-3-lite" or model_name == "voyage-3":
+            return cls(
+                embedding_model="voyage-3-lite",
+                embedding_endpoint_type="voyage",
+                embedding_endpoint="https://api.voyageai.com/v1/embeddings",
+                embedding_dim=1536,
+                embedding_chunk_size=300,
             )
         else:
             raise ValueError(f"Model {model_name} not supported.")
