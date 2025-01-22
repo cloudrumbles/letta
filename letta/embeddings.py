@@ -168,10 +168,9 @@ class OllamaEmbeddings:
 
 
 class VoyageEmbedding:
-    def __init__(self, api_key: str, model: str = "voyage-3", input_type: str = "document"):
+    def __init__(self, api_key: str, model: str = "voyage-3-lite"):
         self.api_key = api_key
         self.model = model
-        self.input_type = input_type
 
     def get_text_embedding(self, text: str) -> List[float]:
         import httpx
@@ -183,7 +182,6 @@ class VoyageEmbedding:
         json_data = {
             "input": text,
             "model": self.model,
-            "input_type": self.input_type,
         }
 
         with httpx.Client() as client:

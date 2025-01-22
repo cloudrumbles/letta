@@ -73,9 +73,6 @@ class AgentManager:
         if not agent_create.llm_config or not agent_create.embedding_config:
             raise ValueError("llm_config and embedding_config are required")
 
-        # Set default embedding model to voyage-3-lite if not specified
-        if not agent_create.embedding_config.embedding_model:
-            agent_create.embedding_config.embedding_model = "voyage-3-lite"
 
         # Check tool rules are valid
         if agent_create.tool_rules:
@@ -221,13 +218,6 @@ class AgentManager:
                 actor=actor,
             )
 
-        # Ensure the embedding model is one of the allowed values
-        if agent_update.embedding_config and agent_update.embedding_config.embedding_model not in [
-            "voyage-3-large",
-            "voyage-3-lite",
-            "voyage-3",
-        ]:
-            raise ValueError("Invalid embedding model specified. Allowed values are 'voyage-3-large', 'voyage-3-lite', or 'voyage-3'.")
 
         # Rebuild the system prompt if it's different
         if agent_update.system and agent_update.system != agent_state.system:
