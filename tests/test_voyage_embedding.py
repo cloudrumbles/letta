@@ -1,6 +1,9 @@
 import os
+
 import pytest
+
 from letta.embeddings import VoyageEmbedding
+
 
 @pytest.mark.skipif(
     not os.getenv("VOYAGE_API_KEY"),
