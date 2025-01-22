@@ -73,7 +73,6 @@ class AgentManager:
         if not agent_create.llm_config or not agent_create.embedding_config:
             raise ValueError("llm_config and embedding_config are required")
 
-
         # Check tool rules are valid
         if agent_create.tool_rules:
             check_supports_structured_output(model=agent_create.llm_config.model, tool_rules=agent_create.tool_rules)
@@ -217,7 +216,6 @@ class AgentManager:
                 env_vars=agent_update.tool_exec_environment_variables,
                 actor=actor,
             )
-
 
         # Rebuild the system prompt if it's different
         if agent_update.system and agent_update.system != agent_state.system:
