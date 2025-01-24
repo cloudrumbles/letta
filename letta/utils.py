@@ -851,7 +851,7 @@ def get_local_time_military():
     return formatted_time
 
 
-def get_local_time_timezone(timezone="America/Los_Angeles"):
+def get_local_time_timezone(timezone="Asia/Singapore"):
     # Get the current time in UTC
     current_time_utc = datetime.now(pytz.utc)
 
