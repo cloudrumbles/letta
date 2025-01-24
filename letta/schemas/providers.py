@@ -807,7 +807,7 @@ class VoyageProvider(Provider):
                     embedding_endpoint_type="voyage",
                     embedding_endpoint=self.base_url,
                     embedding_dim=embedding_dim,
-                    embedding_chunk_size=300, 
+                    embedding_chunk_size=300,
                     handle=self.get_handle(model_name, is_embedding=True),
                 )
             )

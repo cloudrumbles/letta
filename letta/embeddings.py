@@ -176,10 +176,7 @@ class VoyageEmbeddings:
     def get_text_embedding(self, text: str) -> List[float]:
         import httpx
 
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}"
-        }
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
         json_data = {
             "model": self.model,
             "input": text,
@@ -187,7 +184,7 @@ class VoyageEmbeddings:
 
         with httpx.Client() as client:
             response = client.post(
-                f"{self.base_url}/embeddings", 
+                f"{self.base_url}/embeddings",
                 headers=headers,
                 json=json_data,
             )
@@ -271,6 +268,7 @@ def embedding_model(config: EmbeddingConfig, user_id: Optional[uuid.UUID] = None
 
     elif endpoint_type == "voyage":
         from letta.settings import model_settings
+
         return VoyageEmbeddings(
             model=config.embedding_model,
             base_url=config.embedding_endpoint,
