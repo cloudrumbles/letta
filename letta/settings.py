@@ -96,6 +96,9 @@ class ModelSettings(BaseSettings):
     openllm_auth_type: Optional[str] = None
     openllm_api_key: Optional[str] = None
 
+    # voyage
+    voyage_api_key: Optional[str] = None
+
     # disable openapi schema generation
     disable_schema_generation: bool = False
 

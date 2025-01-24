@@ -173,7 +173,7 @@ class OpenAIProvider(Provider):
 
         return configs
 
-    def list_embedding_models(self) -> List[EmbeddingConfig]:
+    def list_embedding_models(self) -> List<EmbeddingConfig]:
 
         # TODO: actually automatically list models
         return [
@@ -772,3 +772,55 @@ class AnthropicBedrockProvider(Provider):
 
     def get_handle(self, model_name: str) -> str:
         return f"anthropic/{model_name}"
+
+
+class VoyageProvider(Provider):
+    """Provider for Voyage AI embeddings"""
+
+    name: str = "voyage"
+    base_url: str = "https://api.voyageai.com/v1"
+    api_key: str = Field(..., description="API key for the Voyage AI API.")
+
+    def list_llm_models(self) -> List[LLMConfig]:
+        # Voyage AI does not provide LLM models
+        return []
+
+    def list_embedding_models(self) -> List[EmbeddingConfig]:
+        # Hardcoded list of supported models and their dimensions
+        model_configs = [
+            ("voyage-3-large", 1024),
+            ("voyage-3", 1024),
+            ("voyage-3-lite", 1024),
+            ("voyage-code-3", 1024),
+            ("voyage-finance-2", 1024),
+            ("voyage-law-2", 1024),
+            ("voyage-multilingual-2", 1024),
+            ("voyage-large-2", 1024),
+            ("voyage-large-2-instruct", 1024),
+        ]
+
+        configs = []
+        for model_name, embedding_dim in model_configs:
+            configs.append(
+                EmbeddingConfig(
+                    embedding_model=model_name,
+                    embedding_endpoint_type="voyage",
+                    embedding_endpoint=self.base_url,
+                    embedding_dim=embedding_dim,
+                    embedding_chunk_size=300, 
+                    handle=self.get_handle(model_name, is_embedding=True),
+                )
+            )
+        return configs
+
+    def get_model_context_window(self, model_name: str) -> Optional[int]:
+        # Token limits vary by model:
+        # - voyage-3-lite: 1M tokens
+        # - voyage-3, voyage-2: 320K tokens
+        # - Others (voyage-3-large, voyage-code-3, etc.): 120K tokens
+        if model_name == "voyage-3-lite":
+            return 1_000_000
+        elif model_name in ["voyage-3", "voyage-2"]:
+            return 320_000
+        else:
+            return 120_000

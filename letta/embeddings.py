@@ -167,6 +167,38 @@ class OllamaEmbeddings:
         return response_json["embedding"]
 
 
+class VoyageEmbeddings:
+    def __init__(self, model: str, base_url: str, api_key: str):
+        self.model = model
+        self.base_url = base_url
+        self.api_key = api_key
+
+    def get_text_embedding(self, text: str) -> List[float]:
+        import httpx
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}"
+        }
+        json_data = {
+            "model": self.model,
+            "input": text,
+        }
+
+        with httpx.Client() as client:
+            response = client.post(
+                f"{self.base_url}/embeddings", 
+                headers=headers,
+                json=json_data,
+            )
+
+        if response.status_code != 200:
+            raise Exception(f"Error from Voyage API: {response.text}")
+
+        response_json = response.json()
+        return response_json["data"][0]["embedding"]
+
+
 def query_embedding(embedding_model, query_text: str):
     """Generate padded embedding for querying database"""
     query_vec = embedding_model.get_text_embedding(query_text)
@@ -236,6 +268,14 @@ def embedding_model(config: EmbeddingConfig, user_id: Optional[uuid.UUID] = None
             ollama_additional_kwargs={},
         )
         return model
+
+    elif endpoint_type == "voyage":
+        from letta.settings import model_settings
+        return VoyageEmbeddings(
+            model=config.embedding_model,
+            base_url=config.embedding_endpoint,
+            api_key=model_settings.voyage_api_key,
+        )
 
     else:
         raise ValueError(f"Unknown endpoint type {endpoint_type}")
