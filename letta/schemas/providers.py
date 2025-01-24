@@ -173,7 +173,7 @@ class OpenAIProvider(Provider):
 
         return configs
 
-    def list_embedding_models(self) -> List<EmbeddingConfig]:
+    def list_embedding_models(self) -> List[EmbeddingConfig]:
 
         # TODO: actually automatically list models
         return [
