@@ -1,5 +1,6 @@
 from typing import Optional
 
+from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall as OpenAIToolCall
 from sqlalchemy import ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -7,14 +8,17 @@ from letta.orm.custom_columns import ToolCallColumn
 from letta.orm.mixins import AgentMixin, OrganizationMixin
 from letta.orm.sqlalchemy_base import SqlalchemyBase
 from letta.schemas.message import Message as PydanticMessage
-from letta.schemas.openai.chat_completions import ToolCall
+from letta.schemas.message import TextContent as PydanticTextContent
 
 
 class Message(SqlalchemyBase, OrganizationMixin, AgentMixin):
     """Defines data model for storing Message objects"""
 
     __tablename__ = "messages"
-    __table_args__ = (Index("ix_messages_agent_created_at", "agent_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_messages_agent_created_at", "agent_id", "created_at"),
+        Index("ix_messages_created_at", "created_at", "id"),
+    )
     __pydantic_model__ = PydanticMessage
 
     id: Mapped[str] = mapped_column(primary_key=True, doc="Unique message identifier")
@@ -22,7 +26,7 @@ class Message(SqlalchemyBase, OrganizationMixin, AgentMixin):
     text: Mapped[Optional[str]] = mapped_column(nullable=True, doc="Message content")
     model: Mapped[Optional[str]] = mapped_column(nullable=True, doc="LLM model used")
     name: Mapped[Optional[str]] = mapped_column(nullable=True, doc="Name for multi-agent scenarios")
-    tool_calls: Mapped[ToolCall] = mapped_column(ToolCallColumn, doc="Tool call information")
+    tool_calls: Mapped[OpenAIToolCall] = mapped_column(ToolCallColumn, doc="Tool call information")
     tool_call_id: Mapped[Optional[str]] = mapped_column(nullable=True, doc="ID of the tool call")
     step_id: Mapped[Optional[str]] = mapped_column(
         ForeignKey("steps.id", ondelete="SET NULL"), nullable=True, doc="ID of the step that this message belongs to"
@@ -42,3 +46,10 @@ class Message(SqlalchemyBase, OrganizationMixin, AgentMixin):
     def job(self) -> Optional["Job"]:
         """Get the job associated with this message, if any."""
         return self.job_message.job if self.job_message else None
+
+    def to_pydantic(self) -> PydanticMessage:
+        """custom pydantic conversion for message content mapping"""
+        model = self.__pydantic_model__.model_validate(self)
+        if self.text:
+            model.content = [PydanticTextContent(text=self.text)]
+        return model

@@ -3,6 +3,8 @@ import time
 from datetime import datetime, timedelta
 
 import pytest
+from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall as OpenAIToolCall
+from openai.types.chat.chat_completion_message_tool_call import Function as OpenAIFunction
 from sqlalchemy import delete
 from sqlalchemy.exc import IntegrityError
 
@@ -48,7 +50,6 @@ from letta.schemas.llm_config import LLMConfig
 from letta.schemas.message import Message as PydanticMessage
 from letta.schemas.message import MessageCreate, MessageUpdate
 from letta.schemas.openai.chat_completion_response import UsageStatistics
-from letta.schemas.openai.chat_completions import ToolCall, ToolCallFunction
 from letta.schemas.organization import Organization as PydanticOrganization
 from letta.schemas.passage import Passage as PydanticPassage
 from letta.schemas.run import Run as PydanticRun
@@ -56,7 +57,7 @@ from letta.schemas.sandbox_config import E2BSandboxConfig, LocalSandboxConfig, S
 from letta.schemas.source import Source as PydanticSource
 from letta.schemas.source import SourceUpdate
 from letta.schemas.tool import Tool as PydanticTool
-from letta.schemas.tool import ToolUpdate
+from letta.schemas.tool import ToolCreate, ToolUpdate
 from letta.schemas.tool_rule import InitToolRule
 from letta.schemas.usage import LettaUsageStatistics
 from letta.schemas.user import User as PydanticUser
@@ -134,7 +135,7 @@ def default_source(server: SyncServer, default_user):
     source_pydantic = PydanticSource(
         name="Test Source",
         description="This is a test source.",
-        metadata_={"type": "test"},
+        metadata={"type": "test"},
         embedding_config=DEFAULT_EMBEDDING_CONFIG,
     )
     source = server.source_manager.create_source(source=source_pydantic, actor=default_user)
@@ -146,7 +147,7 @@ def other_source(server: SyncServer, default_user):
     source_pydantic = PydanticSource(
         name="Another Test Source",
         description="This is yet another test source.",
-        metadata_={"type": "another_test"},
+        metadata={"type": "another_test"},
         embedding_config=DEFAULT_EMBEDDING_CONFIG,
     )
     source = server.source_manager.create_source(source=source_pydantic, actor=default_user)
@@ -197,6 +198,13 @@ def print_tool(server: SyncServer, default_user, default_organization):
 
 
 @pytest.fixture
+def composio_github_star_tool(server, default_user):
+    tool_create = ToolCreate.from_composio(action_name="GITHUB_STAR_A_REPOSITORY_FOR_THE_AUTHENTICATED_USER")
+    tool = server.tool_manager.create_or_update_composio_tool(pydantic_tool=PydanticTool(**tool_create.model_dump()), actor=default_user)
+    yield tool
+
+
+@pytest.fixture
 def default_job(server: SyncServer, default_user):
     """Fixture to create and return a default job."""
     job_pydantic = PydanticJob(
@@ -228,7 +236,7 @@ def agent_passage_fixture(server: SyncServer, default_user, sarah_agent):
             organization_id=default_user.organization_id,
             embedding=[0.1],
             embedding_config=DEFAULT_EMBEDDING_CONFIG,
-            metadata_={"type": "test"},
+            metadata={"type": "test"},
         ),
         actor=default_user,
     )
@@ -246,7 +254,7 @@ def source_passage_fixture(server: SyncServer, default_user, default_file, defau
             organization_id=default_user.organization_id,
             embedding=[0.1],
             embedding_config=DEFAULT_EMBEDDING_CONFIG,
-            metadata_={"type": "test"},
+            metadata={"type": "test"},
         ),
         actor=default_user,
     )
@@ -266,7 +274,7 @@ def create_test_passages(server: SyncServer, default_file, default_user, sarah_a
                 organization_id=default_user.organization_id,
                 embedding=[0.1],
                 embedding_config=DEFAULT_EMBEDDING_CONFIG,
-                metadata_={"type": "test"},
+                metadata={"type": "test"},
             ),
             actor=default_user,
         )
@@ -284,7 +292,7 @@ def create_test_passages(server: SyncServer, default_file, default_user, sarah_a
                 organization_id=default_user.organization_id,
                 embedding=[0.1],
                 embedding_config=DEFAULT_EMBEDDING_CONFIG,
-                metadata_={"type": "test"},
+                metadata={"type": "test"},
             ),
             actor=default_user,
         )
@@ -341,7 +349,7 @@ def default_block(server: SyncServer, default_user):
         value="Default Block Content",
         description="A default test block",
         limit=1000,
-        metadata_={"type": "test"},
+        metadata={"type": "test"},
     )
     block = block_manager.create_or_update_block(block_data, actor=default_user)
     yield block
@@ -356,7 +364,7 @@ def other_block(server: SyncServer, default_user):
         value="Other Block Content",
         description="Another test block",
         limit=500,
-        metadata_={"type": "test"},
+        metadata={"type": "test"},
     )
     block = block_manager.create_or_update_block(block_data, actor=default_user)
     yield block
@@ -437,9 +445,9 @@ def comprehensive_test_agent_fixture(server: SyncServer, default_user, print_too
         source_ids=[default_source.id],
         tags=["a", "b"],
         description="test_description",
-        metadata_={"test_key": "test_value"},
+        metadata={"test_key": "test_value"},
         tool_rules=[InitToolRule(tool_name=print_tool.name)],
-        initial_message_sequence=[MessageCreate(role=MessageRole.user, text="hello world")],
+        initial_message_sequence=[MessageCreate(role=MessageRole.user, content="hello world")],
         tool_exec_environment_variables={"test_env_var_key_a": "test_env_var_value_a", "test_env_var_key_b": "test_env_var_value_b"},
     )
     created_agent = server.agent_manager.create_agent(
@@ -541,7 +549,7 @@ def test_create_agent_passed_in_initial_messages(server: SyncServer, default_use
         block_ids=[default_block.id],
         tags=["a", "b"],
         description="test_description",
-        initial_message_sequence=[MessageCreate(role=MessageRole.user, text="hello world")],
+        initial_message_sequence=[MessageCreate(role=MessageRole.user, content="hello world")],
     )
     agent_state = server.agent_manager.create_agent(
         create_agent_request,
@@ -554,7 +562,7 @@ def test_create_agent_passed_in_initial_messages(server: SyncServer, default_use
     assert create_agent_request.memory_blocks[0].value in init_messages[0].text
     # Check that the second message is the passed in initial message seq
     assert create_agent_request.initial_message_sequence[0].role == init_messages[1].role
-    assert create_agent_request.initial_message_sequence[0].text in init_messages[1].text
+    assert create_agent_request.initial_message_sequence[0].content in init_messages[1].text
 
 
 def test_create_agent_default_initial_message(server: SyncServer, default_user, default_block):
@@ -593,7 +601,7 @@ def test_update_agent(server: SyncServer, comprehensive_test_agent_fixture, othe
         llm_config=LLMConfig.default_config("gpt-4o-mini"),
         embedding_config=EmbeddingConfig.default_config(model_name="letta"),
         message_ids=["10", "20"],
-        metadata_={"train_key": "train_value"},
+        metadata={"train_key": "train_value"},
         tool_exec_environment_variables={"test_env_var_key_a": "a", "new_tool_exec_key": "n"},
     )
 
@@ -906,10 +914,17 @@ def test_list_agents_by_tags_pagination(server: SyncServer, default_user, defaul
 
     # Get second page using cursor
     second_page = server.agent_manager.list_agents(
-        tags=["pagination_test"], match_all_tags=True, actor=default_user, cursor=first_agent_id, limit=1
+        tags=["pagination_test"], match_all_tags=True, actor=default_user, after=first_agent_id, limit=1
     )
     assert len(second_page) == 1
     assert second_page[0].id != first_agent_id
+
+    # Get previous page using before
+    prev_page = server.agent_manager.list_agents(
+        tags=["pagination_test"], match_all_tags=True, actor=default_user, before=second_page[0].id, limit=1
+    )
+    assert len(prev_page) == 1
+    assert prev_page[0].id == first_agent_id
 
     # Verify we got both agents with no duplicates
     all_ids = {first_page[0].id, second_page[0].id}
@@ -972,9 +987,19 @@ def test_list_agents_query_text_pagination(server: SyncServer, default_user, def
     first_agent_id = first_page[0].id
 
     # Get second page using cursor
-    second_page = server.agent_manager.list_agents(actor=default_user, query_text="search agent", cursor=first_agent_id, limit=1)
+    second_page = server.agent_manager.list_agents(actor=default_user, query_text="search agent", after=first_agent_id, limit=1)
     assert len(second_page) == 1
     assert second_page[0].id != first_agent_id
+
+    # Test before and after
+    all_agents = server.agent_manager.list_agents(actor=default_user, query_text="agent")
+    assert len(all_agents) == 3
+    first_agent, second_agent, third_agent = all_agents
+    middle_agent = server.agent_manager.list_agents(
+        actor=default_user, query_text="search agent", before=third_agent.id, after=first_agent.id
+    )
+    assert len(middle_agent) == 1
+    assert middle_agent[0].id == second_agent.id
 
     # Verify we got both search agents with no duplicates
     all_ids = {first_page[0].id, second_page[0].id}
@@ -1131,6 +1156,10 @@ def test_detach_block(server: SyncServer, sarah_agent, default_block, default_us
     agent = server.agent_manager.get_agent_by_id(sarah_agent.id, actor=default_user)
     assert len(agent.memory.blocks) == 0
 
+    # Check that block still exists
+    block = server.block_manager.get_block_by_id(block_id=default_block.id, actor=default_user)
+    assert block
+
 
 def test_detach_nonexistent_block(server: SyncServer, sarah_agent, default_user):
     """Test detaching a block that isn't attached."""
@@ -1224,11 +1253,32 @@ def test_agent_list_passages_pagination(server, default_user, sarah_agent, agent
     assert len(first_page) == 2
 
     second_page = server.agent_manager.list_passages(
-        actor=default_user, agent_id=sarah_agent.id, cursor=first_page[-1].id, limit=2, ascending=True
+        actor=default_user, agent_id=sarah_agent.id, after=first_page[-1].id, limit=2, ascending=True
     )
     assert len(second_page) == 2
     assert first_page[-1].id != second_page[0].id
     assert first_page[-1].created_at <= second_page[0].created_at
+
+    """
+    [1]   [2]
+    * * | * *
+
+       [mid]
+    * | * * | *
+    """
+    middle_page = server.agent_manager.list_passages(
+        actor=default_user, agent_id=sarah_agent.id, before=second_page[-1].id, after=first_page[0].id, ascending=True
+    )
+    assert len(middle_page) == 2
+    assert middle_page[0].id == first_page[-1].id
+    assert middle_page[1].id == second_page[0].id
+
+    middle_page_desc = server.agent_manager.list_passages(
+        actor=default_user, agent_id=sarah_agent.id, before=second_page[-1].id, after=first_page[0].id, ascending=False
+    )
+    assert len(middle_page_desc) == 2
+    assert middle_page_desc[0].id == second_page[0].id
+    assert middle_page_desc[1].id == first_page[-1].id
 
 
 def test_agent_list_passages_text_search(server, default_user, sarah_agent, agent_passages_setup):
@@ -1394,11 +1444,11 @@ def test_list_organizations_pagination(server: SyncServer):
     orgs_x = server.organization_manager.list_organizations(limit=1)
     assert len(orgs_x) == 1
 
-    orgs_y = server.organization_manager.list_organizations(cursor=orgs_x[0].id, limit=1)
+    orgs_y = server.organization_manager.list_organizations(after=orgs_x[0].id, limit=1)
     assert len(orgs_y) == 1
     assert orgs_y[0].name != orgs_x[0].name
 
-    orgs = server.organization_manager.list_organizations(cursor=orgs_y[0].id, limit=1)
+    orgs = server.organization_manager.list_organizations(after=orgs_y[0].id, limit=1)
     assert len(orgs) == 0
 
 
@@ -1549,6 +1599,14 @@ def test_create_tool(server: SyncServer, print_tool, default_user, default_organ
     # Assertions to ensure the created tool matches the expected values
     assert print_tool.created_by_id == default_user.id
     assert print_tool.organization_id == default_organization.id
+    assert print_tool.tool_type == ToolType.CUSTOM
+
+
+def test_create_composio_tool(server: SyncServer, composio_github_star_tool, default_user, default_organization):
+    # Assertions to ensure the created tool matches the expected values
+    assert composio_github_star_tool.created_by_id == default_user.id
+    assert composio_github_star_tool.organization_id == default_organization.id
+    assert composio_github_star_tool.tool_type == ToolType.EXTERNAL_COMPOSIO
 
 
 @pytest.mark.skipif(USING_SQLITE, reason="Test not applicable when using SQLite.")
@@ -1773,7 +1831,7 @@ def test_message_get_by_id(server: SyncServer, hello_world_message_fixture, defa
 def test_message_update(server: SyncServer, hello_world_message_fixture, default_user, other_user):
     """Test updating a message"""
     new_text = "Updated text"
-    updated = server.message_manager.update_message_by_id(hello_world_message_fixture.id, MessageUpdate(text=new_text), actor=other_user)
+    updated = server.message_manager.update_message_by_id(hello_world_message_fixture.id, MessageUpdate(content=new_text), actor=other_user)
     assert updated is not None
     assert updated.text == new_text
     retrieved = server.message_manager.get_message_by_id(hello_world_message_fixture.id, actor=default_user)
@@ -1855,7 +1913,7 @@ def test_message_listing_cursor(server: SyncServer, hello_world_message_fixture,
     """Test cursor-based pagination functionality"""
     create_test_messages(server, hello_world_message_fixture, default_user)
 
-    # Make sure there are 5 messages
+    # Make sure there are 6 messages
     assert server.message_manager.size(actor=default_user, role=MessageRole.user) == 6
 
     # Get first page
@@ -1866,10 +1924,27 @@ def test_message_listing_cursor(server: SyncServer, hello_world_message_fixture,
 
     # Get second page
     second_page = server.message_manager.list_user_messages_for_agent(
-        agent_id=sarah_agent.id, actor=default_user, cursor=last_id_on_first_page, limit=3
+        agent_id=sarah_agent.id, actor=default_user, after=last_id_on_first_page, limit=3
     )
-    assert len(second_page) == 3  # Should have 2 remaining messages
+    assert len(second_page) == 3  # Should have 3 remaining messages
     assert all(r1.id != r2.id for r1 in first_page for r2 in second_page)
+
+    # Get the middle
+    middle_page = server.message_manager.list_user_messages_for_agent(
+        agent_id=sarah_agent.id, actor=default_user, before=second_page[1].id, after=first_page[0].id
+    )
+    assert len(middle_page) == 3
+    assert middle_page[0].id == first_page[1].id
+    assert middle_page[1].id == first_page[-1].id
+    assert middle_page[-1].id == second_page[0].id
+
+    middle_page_desc = server.message_manager.list_user_messages_for_agent(
+        agent_id=sarah_agent.id, actor=default_user, before=second_page[1].id, after=first_page[0].id, ascending=False
+    )
+    assert len(middle_page_desc) == 3
+    assert middle_page_desc[0].id == second_page[0].id
+    assert middle_page_desc[1].id == first_page[-1].id
+    assert middle_page_desc[-1].id == first_page[1].id
 
 
 def test_message_listing_filtering(server: SyncServer, hello_world_message_fixture, default_user, sarah_agent):
@@ -1923,7 +1998,7 @@ def test_create_block(server: SyncServer, default_user):
         template_name="sample_template",
         description="A test block",
         limit=1000,
-        metadata_={"example": "data"},
+        metadata={"example": "data"},
     )
 
     block = block_manager.create_or_update_block(block_create, actor=default_user)
@@ -1935,7 +2010,7 @@ def test_create_block(server: SyncServer, default_user):
     assert block.template_name == block_create.template_name
     assert block.description == block_create.description
     assert block.limit == block_create.limit
-    assert block.metadata_ == block_create.metadata_
+    assert block.metadata == block_create.metadata
     assert block.organization_id == default_user.organization_id
 
 
@@ -2010,6 +2085,46 @@ def test_delete_block(server: SyncServer, default_user):
     assert len(blocks) == 0
 
 
+def test_delete_block_detaches_from_agent(server: SyncServer, sarah_agent, default_user):
+    # Create and delete a block
+    block = server.block_manager.create_or_update_block(PydanticBlock(label="human", value="Sample content"), actor=default_user)
+    agent_state = server.agent_manager.attach_block(agent_id=sarah_agent.id, block_id=block.id, actor=default_user)
+
+    # Check that block has been attached
+    assert block.id in [b.id for b in agent_state.memory.blocks]
+
+    # Now attempt to delete the block
+    server.block_manager.delete_block(block_id=block.id, actor=default_user)
+
+    # Verify that the block was deleted
+    blocks = server.block_manager.get_blocks(actor=default_user)
+    assert len(blocks) == 0
+
+    # Check that block has been detached too
+    agent_state = server.agent_manager.get_agent_by_id(agent_id=sarah_agent.id, actor=default_user)
+    assert not (block.id in [b.id for b in agent_state.memory.blocks])
+
+
+def test_get_agents_for_block(server: SyncServer, sarah_agent, charles_agent, default_user):
+    # Create and delete a block
+    block = server.block_manager.create_or_update_block(PydanticBlock(label="alien", value="Sample content"), actor=default_user)
+    sarah_agent = server.agent_manager.attach_block(agent_id=sarah_agent.id, block_id=block.id, actor=default_user)
+    charles_agent = server.agent_manager.attach_block(agent_id=charles_agent.id, block_id=block.id, actor=default_user)
+
+    # Check that block has been attached to both
+    assert block.id in [b.id for b in sarah_agent.memory.blocks]
+    assert block.id in [b.id for b in charles_agent.memory.blocks]
+
+    # Get the agents for that block
+    agent_states = server.block_manager.get_agents_for_block(block_id=block.id, actor=default_user)
+    assert len(agent_states) == 2
+
+    # Check both agents are in the list
+    agent_state_ids = [a.id for a in agent_states]
+    assert sarah_agent.id in agent_state_ids
+    assert charles_agent.id in agent_state_ids
+
+
 # ======================================================================================================================
 # SourceManager Tests - Sources
 # ======================================================================================================================
@@ -2018,7 +2133,7 @@ def test_create_source(server: SyncServer, default_user):
     source_pydantic = PydanticSource(
         name="Test Source",
         description="This is a test source.",
-        metadata_={"type": "test"},
+        metadata={"type": "test"},
         embedding_config=DEFAULT_EMBEDDING_CONFIG,
     )
     source = server.source_manager.create_source(source=source_pydantic, actor=default_user)
@@ -2026,7 +2141,7 @@ def test_create_source(server: SyncServer, default_user):
     # Assertions to check the created source
     assert source.name == source_pydantic.name
     assert source.description == source_pydantic.description
-    assert source.metadata_ == source_pydantic.metadata_
+    assert source.metadata == source_pydantic.metadata
     assert source.organization_id == default_user.organization_id
 
 
@@ -2036,14 +2151,14 @@ def test_create_sources_with_same_name_does_not_error(server: SyncServer, defaul
     source_pydantic = PydanticSource(
         name=name,
         description="This is a test source.",
-        metadata_={"type": "medical"},
+        metadata={"type": "medical"},
         embedding_config=DEFAULT_EMBEDDING_CONFIG,
     )
     source = server.source_manager.create_source(source=source_pydantic, actor=default_user)
     source_pydantic = PydanticSource(
         name=name,
         description="This is a different test source.",
-        metadata_={"type": "legal"},
+        metadata={"type": "legal"},
         embedding_config=DEFAULT_EMBEDDING_CONFIG,
     )
     same_source = server.source_manager.create_source(source=source_pydantic, actor=default_user)
@@ -2058,13 +2173,13 @@ def test_update_source(server: SyncServer, default_user):
     source = server.source_manager.create_source(source=source_pydantic, actor=default_user)
 
     # Update the source
-    update_data = SourceUpdate(name="Updated Source", description="Updated description", metadata_={"type": "updated"})
+    update_data = SourceUpdate(name="Updated Source", description="Updated description", metadata={"type": "updated"})
     updated_source = server.source_manager.update_source(source_id=source.id, source_update=update_data, actor=default_user)
 
     # Assertions to verify update
     assert updated_source.name == update_data.name
     assert updated_source.description == update_data.description
-    assert updated_source.metadata_ == update_data.metadata_
+    assert updated_source.metadata == update_data.metadata
 
 
 def test_delete_source(server: SyncServer, default_user):
@@ -2102,7 +2217,7 @@ def test_list_sources(server: SyncServer, default_user):
     assert len(paginated_sources) == 1
 
     # Ensure cursor-based pagination works
-    next_page = server.source_manager.list_sources(actor=default_user, cursor=paginated_sources[-1].id, limit=1)
+    next_page = server.source_manager.list_sources(actor=default_user, after=paginated_sources[-1].id, limit=1)
     assert len(next_page) == 1
     assert next_page[0].name != paginated_sources[0].name
 
@@ -2202,7 +2317,7 @@ def test_list_files(server: SyncServer, default_user, default_source):
     assert len(paginated_files) == 1
 
     # Ensure cursor-based pagination works
-    next_page = server.source_manager.list_files(source_id=default_source.id, actor=default_user, cursor=paginated_files[-1].id, limit=1)
+    next_page = server.source_manager.list_files(source_id=default_source.id, actor=default_user, after=paginated_files[-1].id, limit=1)
     assert len(next_page) == 1
     assert next_page[0].file_name != paginated_files[0].file_name
 
@@ -2300,7 +2415,7 @@ def test_list_sandbox_configs(server: SyncServer, default_user):
     paginated_configs = server.sandbox_config_manager.list_sandbox_configs(actor=default_user, limit=1)
     assert len(paginated_configs) == 1
 
-    next_page = server.sandbox_config_manager.list_sandbox_configs(actor=default_user, cursor=paginated_configs[-1].id, limit=1)
+    next_page = server.sandbox_config_manager.list_sandbox_configs(actor=default_user, after=paginated_configs[-1].id, limit=1)
     assert len(next_page) == 1
     assert next_page[0].id != paginated_configs[0].id
 
@@ -2371,7 +2486,7 @@ def test_list_sandbox_env_vars(server: SyncServer, sandbox_config_fixture, defau
     assert len(paginated_env_vars) == 1
 
     next_page = server.sandbox_config_manager.list_sandbox_env_vars(
-        sandbox_config_id=sandbox_config_fixture.id, actor=default_user, cursor=paginated_env_vars[-1].id, limit=1
+        sandbox_config_id=sandbox_config_fixture.id, actor=default_user, after=paginated_env_vars[-1].id, limit=1
     )
     assert len(next_page) == 1
     assert next_page[0].id != paginated_env_vars[0].id
@@ -2396,7 +2511,7 @@ def test_create_job(server: SyncServer, default_user):
     """Test creating a job."""
     job_data = PydanticJob(
         status=JobStatus.created,
-        metadata_={"type": "test"},
+        metadata={"type": "test"},
     )
 
     created_job = server.job_manager.create_job(job_data, actor=default_user)
@@ -2404,7 +2519,7 @@ def test_create_job(server: SyncServer, default_user):
     # Assertions to ensure the created job matches the expected values
     assert created_job.user_id == default_user.id
     assert created_job.status == JobStatus.created
-    assert created_job.metadata_ == {"type": "test"}
+    assert created_job.metadata == {"type": "test"}
 
 
 def test_get_job_by_id(server: SyncServer, default_user):
@@ -2412,7 +2527,7 @@ def test_get_job_by_id(server: SyncServer, default_user):
     # Create a job
     job_data = PydanticJob(
         status=JobStatus.created,
-        metadata_={"type": "test"},
+        metadata={"type": "test"},
     )
     created_job = server.job_manager.create_job(job_data, actor=default_user)
 
@@ -2422,7 +2537,7 @@ def test_get_job_by_id(server: SyncServer, default_user):
     # Assertions to ensure the fetched job matches the created job
     assert fetched_job.id == created_job.id
     assert fetched_job.status == JobStatus.created
-    assert fetched_job.metadata_ == {"type": "test"}
+    assert fetched_job.metadata == {"type": "test"}
 
 
 def test_list_jobs(server: SyncServer, default_user):
@@ -2431,7 +2546,7 @@ def test_list_jobs(server: SyncServer, default_user):
     for i in range(3):
         job_data = PydanticJob(
             status=JobStatus.created,
-            metadata_={"type": f"test-{i}"},
+            metadata={"type": f"test-{i}"},
         )
         server.job_manager.create_job(job_data, actor=default_user)
 
@@ -2441,7 +2556,7 @@ def test_list_jobs(server: SyncServer, default_user):
     # Assertions to check that the created jobs are listed
     assert len(jobs) == 3
     assert all(job.user_id == default_user.id for job in jobs)
-    assert all(job.metadata_["type"].startswith("test") for job in jobs)
+    assert all(job.metadata["type"].startswith("test") for job in jobs)
 
 
 def test_update_job_by_id(server: SyncServer, default_user):
@@ -2449,17 +2564,18 @@ def test_update_job_by_id(server: SyncServer, default_user):
     # Create a job
     job_data = PydanticJob(
         status=JobStatus.created,
-        metadata_={"type": "test"},
+        metadata={"type": "test"},
     )
     created_job = server.job_manager.create_job(job_data, actor=default_user)
+    assert created_job.metadata == {"type": "test"}
 
     # Update the job
-    update_data = JobUpdate(status=JobStatus.completed, metadata_={"type": "updated"})
+    update_data = JobUpdate(status=JobStatus.completed, metadata={"type": "updated"})
     updated_job = server.job_manager.update_job_by_id(created_job.id, update_data, actor=default_user)
 
     # Assertions to ensure the job was updated
     assert updated_job.status == JobStatus.completed
-    assert updated_job.metadata_ == {"type": "updated"}
+    assert updated_job.metadata == {"type": "updated"}
     assert updated_job.completed_at is not None
 
 
@@ -2468,7 +2584,7 @@ def test_delete_job_by_id(server: SyncServer, default_user):
     # Create a job
     job_data = PydanticJob(
         status=JobStatus.created,
-        metadata_={"type": "test"},
+        metadata={"type": "test"},
     )
     created_job = server.job_manager.create_job(job_data, actor=default_user)
 
@@ -2485,7 +2601,7 @@ def test_update_job_auto_complete(server: SyncServer, default_user):
     # Create a job
     job_data = PydanticJob(
         status=JobStatus.created,
-        metadata_={"type": "test"},
+        metadata={"type": "test"},
     )
     created_job = server.job_manager.create_job(job_data, actor=default_user)
 
@@ -2518,16 +2634,51 @@ def test_list_jobs_pagination(server: SyncServer, default_user):
     for i in range(10):
         job_data = PydanticJob(
             status=JobStatus.created,
-            metadata_={"type": f"test-{i}"},
+            metadata={"type": f"test-{i}"},
         )
         server.job_manager.create_job(job_data, actor=default_user)
 
     # List jobs with a limit
     jobs = server.job_manager.list_jobs(actor=default_user, limit=5)
-
-    # Assertions to check pagination
     assert len(jobs) == 5
     assert all(job.user_id == default_user.id for job in jobs)
+
+    # Test cursor-based pagination
+    first_page = server.job_manager.list_jobs(actor=default_user, limit=3, ascending=True)  # [J0, J1, J2]
+    assert len(first_page) == 3
+    assert first_page[0].created_at <= first_page[1].created_at <= first_page[2].created_at
+
+    last_page = server.job_manager.list_jobs(actor=default_user, limit=3, ascending=False)  # [J9, J8, J7]
+    assert len(last_page) == 3
+    assert last_page[0].created_at >= last_page[1].created_at >= last_page[2].created_at
+    first_page_ids = set(job.id for job in first_page)
+    last_page_ids = set(job.id for job in last_page)
+    assert first_page_ids.isdisjoint(last_page_ids)
+
+    # Test middle page using both before and after
+    middle_page = server.job_manager.list_jobs(
+        actor=default_user, before=last_page[-1].id, after=first_page[-1].id, ascending=True
+    )  # [J3, J4, J5, J6]
+    assert len(middle_page) == 4  # Should include jobs between first and second page
+    head_tail_jobs = first_page_ids.union(last_page_ids)
+    assert all(job.id not in head_tail_jobs for job in middle_page)
+
+    # Test descending order
+    middle_page_desc = server.job_manager.list_jobs(
+        actor=default_user, before=last_page[-1].id, after=first_page[-1].id, ascending=False
+    )  # [J6, J5, J4, J3]
+    assert len(middle_page_desc) == 4
+    assert middle_page_desc[0].id == middle_page[-1].id
+    assert middle_page_desc[1].id == middle_page[-2].id
+    assert middle_page_desc[2].id == middle_page[-3].id
+    assert middle_page_desc[3].id == middle_page[-4].id
+
+    # BONUS
+    job_7 = last_page[-1].id
+    earliest_jobs = server.job_manager.list_jobs(actor=default_user, ascending=False, before=job_7)
+    assert len(earliest_jobs) == 7
+    assert all(j.id not in last_page_ids for j in earliest_jobs)
+    assert all(earliest_jobs[i].created_at >= earliest_jobs[i + 1].created_at for i in range(len(earliest_jobs) - 1))
 
 
 def test_list_jobs_by_status(server: SyncServer, default_user):
@@ -2535,15 +2686,15 @@ def test_list_jobs_by_status(server: SyncServer, default_user):
     # Create multiple jobs with different statuses
     job_data_created = PydanticJob(
         status=JobStatus.created,
-        metadata_={"type": "test-created"},
+        metadata={"type": "test-created"},
     )
     job_data_in_progress = PydanticJob(
         status=JobStatus.running,
-        metadata_={"type": "test-running"},
+        metadata={"type": "test-running"},
     )
     job_data_completed = PydanticJob(
         status=JobStatus.completed,
-        metadata_={"type": "test-completed"},
+        metadata={"type": "test-completed"},
     )
 
     server.job_manager.create_job(job_data_created, actor=default_user)
@@ -2557,13 +2708,13 @@ def test_list_jobs_by_status(server: SyncServer, default_user):
 
     # Assertions
     assert len(created_jobs) == 1
-    assert created_jobs[0].metadata_["type"] == job_data_created.metadata_["type"]
+    assert created_jobs[0].metadata["type"] == job_data_created.metadata["type"]
 
     assert len(in_progress_jobs) == 1
-    assert in_progress_jobs[0].metadata_["type"] == job_data_in_progress.metadata_["type"]
+    assert in_progress_jobs[0].metadata["type"] == job_data_in_progress.metadata["type"]
 
     assert len(completed_jobs) == 1
-    assert completed_jobs[0].metadata_["type"] == job_data_completed.metadata_["type"]
+    assert completed_jobs[0].metadata["type"] == job_data_completed.metadata["type"]
 
 
 def test_list_jobs_filter_by_type(server: SyncServer, default_user, default_job):
@@ -2643,15 +2794,81 @@ def test_job_messages_pagination(server: SyncServer, default_run, default_user, 
     assert messages[1].id == message_ids[1]
 
     # Test pagination with cursor
-    messages = server.job_manager.get_job_messages(
+    first_page = server.job_manager.get_job_messages(
         job_id=default_run.id,
         actor=default_user,
-        cursor=message_ids[1],
         limit=2,
+        ascending=True,  # [M0, M1]
     )
-    assert len(messages) == 2
-    assert messages[0].id == message_ids[2]
-    assert messages[1].id == message_ids[3]
+    assert len(first_page) == 2
+    assert first_page[0].id == message_ids[0]
+    assert first_page[1].id == message_ids[1]
+    assert first_page[0].created_at <= first_page[1].created_at
+
+    last_page = server.job_manager.get_job_messages(
+        job_id=default_run.id,
+        actor=default_user,
+        limit=2,
+        ascending=False,  # [M4, M3]
+    )
+    assert len(last_page) == 2
+    assert last_page[0].id == message_ids[4]
+    assert last_page[1].id == message_ids[3]
+    assert last_page[0].created_at >= last_page[1].created_at
+
+    first_page_ids = set(msg.id for msg in first_page)
+    last_page_ids = set(msg.id for msg in last_page)
+    assert first_page_ids.isdisjoint(last_page_ids)
+
+    # Test middle page using both before and after
+    middle_page = server.job_manager.get_job_messages(
+        job_id=default_run.id,
+        actor=default_user,
+        before=last_page[-1].id,  # M3
+        after=first_page[0].id,  # M0
+        ascending=True,  # [M1, M2]
+    )
+    assert len(middle_page) == 2  # Should include message between first and last pages
+    assert middle_page[0].id == message_ids[1]
+    assert middle_page[1].id == message_ids[2]
+    head_tail_msgs = first_page_ids.union(last_page_ids)
+    assert middle_page[1].id not in head_tail_msgs
+    assert middle_page[0].id in first_page_ids
+
+    # Test descending order for middle page
+    middle_page = server.job_manager.get_job_messages(
+        job_id=default_run.id,
+        actor=default_user,
+        before=last_page[-1].id,  # M3
+        after=first_page[0].id,  # M0
+        ascending=False,  # [M2, M1]
+    )
+    assert len(middle_page) == 2  # Should include message between first and last pages
+    assert middle_page[0].id == message_ids[2]
+    assert middle_page[1].id == message_ids[1]
+
+    # Test getting earliest messages
+    msg_3 = last_page[-1].id
+    earliest_msgs = server.job_manager.get_job_messages(
+        job_id=default_run.id,
+        actor=default_user,
+        ascending=False,
+        before=msg_3,  # Get messages after M3 in descending order
+    )
+    assert len(earliest_msgs) == 3  # Should get M2, M1, M0
+    assert all(m.id not in last_page_ids for m in earliest_msgs)
+    assert earliest_msgs[0].created_at > earliest_msgs[1].created_at > earliest_msgs[2].created_at
+
+    # Test getting earliest messages with ascending order
+    earliest_msgs_ascending = server.job_manager.get_job_messages(
+        job_id=default_run.id,
+        actor=default_user,
+        ascending=True,
+        before=msg_3,  # Get messages before M3 in ascending order
+    )
+    assert len(earliest_msgs_ascending) == 3  # Should get M0, M1, M2
+    assert all(m.id not in last_page_ids for m in earliest_msgs_ascending)
+    assert earliest_msgs_ascending[0].created_at < earliest_msgs_ascending[1].created_at < earliest_msgs_ascending[2].created_at
 
 
 def test_job_messages_ordering(server: SyncServer, default_run, default_user, sarah_agent):
@@ -2752,9 +2969,10 @@ def test_job_messages_filter(server: SyncServer, default_run, default_user, sara
             organization_id=default_user.organization_id,
             agent_id=sarah_agent.id,
             tool_calls=[
-                ToolCall(
+                OpenAIToolCall(
                     id="call_1",
-                    function=ToolCallFunction(
+                    type="function",
+                    function=OpenAIFunction(
                         name="test_tool",
                         arguments='{"arg1": "value1"}',
                     ),
@@ -2782,7 +3000,7 @@ def test_job_messages_filter(server: SyncServer, default_run, default_user, sara
     assert len(limited_messages) == 2
 
 
-def test_get_run_messages_cursor(server: SyncServer, default_user: PydanticUser, sarah_agent):
+def test_get_run_messages(server: SyncServer, default_user: PydanticUser, sarah_agent):
     """Test getting messages for a run with request config."""
     # Create a run with custom request config
     run = server.job_manager.create_job(
@@ -2804,7 +3022,9 @@ def test_get_run_messages_cursor(server: SyncServer, default_user: PydanticUser,
             role=MessageRole.user if i % 2 == 0 else MessageRole.assistant,
             text=f"Test message {i}",
             tool_calls=(
-                [{"id": f"call_{i}", "function": {"name": "custom_tool", "arguments": '{"custom_arg": "test"}'}}] if i % 2 == 1 else None
+                [{"type": "function", "id": f"call_{i}", "function": {"name": "custom_tool", "arguments": '{"custom_arg": "test"}'}}]
+                if i % 2 == 1
+                else None
             ),
         )
         for i in range(4)
@@ -2815,7 +3035,7 @@ def test_get_run_messages_cursor(server: SyncServer, default_user: PydanticUser,
         server.job_manager.add_message_to_job(job_id=run.id, message_id=created_msg.id, actor=default_user)
 
     # Get messages and verify they're converted correctly
-    result = server.job_manager.get_run_messages_cursor(run_id=run.id, actor=default_user)
+    result = server.job_manager.get_run_messages(run_id=run.id, actor=default_user)
 
     # Verify correct number of messages. Assistant messages should be parsed
     assert len(result) == 6
@@ -2975,7 +3195,7 @@ def test_list_tags(server: SyncServer, default_user, default_organization):
     assert limited_tags == tags[:2]  # Should return first 2 tags
 
     # Test pagination with cursor
-    cursor_tags = server.agent_manager.list_tags(actor=default_user, cursor="beta")
+    cursor_tags = server.agent_manager.list_tags(actor=default_user, after="beta")
     assert cursor_tags == ["delta", "epsilon", "gamma"]  # Tags after "beta"
 
     # Test text search

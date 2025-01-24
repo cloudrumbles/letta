@@ -111,7 +111,11 @@ class SandboxConfigManager:
 
     @enforce_types
     def list_sandbox_configs(
-        self, actor: PydanticUser, cursor: Optional[str] = None, limit: Optional[int] = 50, sandbox_type: Optional[SandboxType] = None
+        self,
+        actor: PydanticUser,
+        after: Optional[str] = None,
+        limit: Optional[int] = 50,
+        sandbox_type: Optional[SandboxType] = None,
     ) -> List[PydanticSandboxConfig]:
         """List all sandbox configurations with optional pagination."""
         kwargs = {"organization_id": actor.organization_id}
@@ -119,7 +123,7 @@ class SandboxConfigManager:
             kwargs.update({"type": sandbox_type})
 
         with self.session_maker() as session:
-            sandboxes = SandboxConfigModel.list(db_session=session, cursor=cursor, limit=limit, **kwargs)
+            sandboxes = SandboxConfigModel.list(db_session=session, after=after, limit=limit, **kwargs)
             return [sandbox.to_pydantic() for sandbox in sandboxes]
 
     @enforce_types
@@ -172,7 +176,7 @@ class SandboxConfigManager:
             return db_env_var
         else:
             with self.session_maker() as session:
-                env_var = SandboxEnvVarModel(**env_var.model_dump(exclude_none=True))
+                env_var = SandboxEnvVarModel(**env_var.model_dump(to_orm=True, exclude_none=True))
                 env_var.create(session, actor=actor)
             return env_var.to_pydantic()
 
@@ -183,7 +187,7 @@ class SandboxConfigManager:
         """Update an existing sandbox environment variable."""
         with self.session_maker() as session:
             env_var = SandboxEnvVarModel.read(db_session=session, identifier=env_var_id, actor=actor)
-            update_data = env_var_update.model_dump(exclude_unset=True, exclude_none=True)
+            update_data = env_var_update.model_dump(to_orm=True, exclude_unset=True, exclude_none=True)
             update_data = {key: value for key, value in update_data.items() if getattr(env_var, key) != value}
 
             if update_data:
@@ -207,13 +211,17 @@ class SandboxConfigManager:
 
     @enforce_types
     def list_sandbox_env_vars(
-        self, sandbox_config_id: str, actor: PydanticUser, cursor: Optional[str] = None, limit: Optional[int] = 50
+        self,
+        sandbox_config_id: str,
+        actor: PydanticUser,
+        after: Optional[str] = None,
+        limit: Optional[int] = 50,
     ) -> List[PydanticEnvVar]:
         """List all sandbox environment variables with optional pagination."""
         with self.session_maker() as session:
             env_vars = SandboxEnvVarModel.list(
                 db_session=session,
-                cursor=cursor,
+                after=after,
                 limit=limit,
                 organization_id=actor.organization_id,
                 sandbox_config_id=sandbox_config_id,
@@ -222,13 +230,13 @@ class SandboxConfigManager:
 
     @enforce_types
     def list_sandbox_env_vars_by_key(
-        self, key: str, actor: PydanticUser, cursor: Optional[str] = None, limit: Optional[int] = 50
+        self, key: str, actor: PydanticUser, after: Optional[str] = None, limit: Optional[int] = 50
     ) -> List[PydanticEnvVar]:
         """List all sandbox environment variables with optional pagination."""
         with self.session_maker() as session:
             env_vars = SandboxEnvVarModel.list(
                 db_session=session,
-                cursor=cursor,
+                after=after,
                 limit=limit,
                 organization_id=actor.organization_id,
                 key=key,
@@ -237,9 +245,9 @@ class SandboxConfigManager:
 
     @enforce_types
     def get_sandbox_env_vars_as_dict(
-        self, sandbox_config_id: str, actor: PydanticUser, cursor: Optional[str] = None, limit: Optional[int] = 50
+        self, sandbox_config_id: str, actor: PydanticUser, after: Optional[str] = None, limit: Optional[int] = 50
     ) -> Dict[str, str]:
-        env_vars = self.list_sandbox_env_vars(sandbox_config_id, actor, cursor, limit)
+        env_vars = self.list_sandbox_env_vars(sandbox_config_id, actor, after, limit)
         result = {}
         for env_var in env_vars:
             result[env_var.key] = env_var.value

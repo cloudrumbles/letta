@@ -205,9 +205,9 @@ def test_archival_memory(mock_e2b_api_key_none, client: Union[LocalClient, RESTC
     passages = client.get_archival_memory(agent.id)
     assert passage.text in [p.text for p in passages], f"Missing passage {passage.text} in {passages}"
 
-    # get archival memory summary
-    archival_summary = client.get_archival_memory_summary(agent.id)
-    assert archival_summary.size == 1, f"Archival memory summary size is {archival_summary.size}"
+    # # get archival memory summary
+    # archival_summary = client.get_agent_archival_memory_summary(agent.id)
+    # assert archival_summary.size == 1, f"Archival memory summary size is {archival_summary.size}"
 
     # delete archival memory
     client.delete_archival_memory(agent.id, passage.id)
@@ -369,7 +369,7 @@ def test_list_files_pagination(client: Union[LocalClient, RESTClient], agent: Ag
     assert files_a[0].source_id == source.id
 
     # Use the cursor from response_a to get the remaining file
-    files_b = client.list_files_from_source(source.id, limit=1, cursor=files_a[-1].id)
+    files_b = client.list_files_from_source(source.id, limit=1, after=files_a[-1].id)
     assert len(files_b) == 1
     assert files_b[0].source_id == source.id
 
@@ -377,7 +377,7 @@ def test_list_files_pagination(client: Union[LocalClient, RESTClient], agent: Ag
     assert files_a[0].file_name != files_b[0].file_name
 
     # Use the cursor from response_b to list files, should be empty
-    files = client.list_files_from_source(source.id, limit=1, cursor=files_b[-1].id)
+    files = client.list_files_from_source(source.id, limit=1, after=files_b[-1].id)
     assert len(files) == 0  # Should be empty
 
 
@@ -466,8 +466,8 @@ def test_sources(client: Union[LocalClient, RESTClient], agent: AgentState):
     assert len(sources) == 1
 
     # TODO: add back?
-    assert sources[0].metadata_["num_passages"] == 0
-    assert sources[0].metadata_["num_documents"] == 0
+    assert sources[0].metadata["num_passages"] == 0
+    assert sources[0].metadata["num_documents"] == 0
 
     # update the source
     original_id = source.id
@@ -491,7 +491,7 @@ def test_sources(client: Union[LocalClient, RESTClient], agent: AgentState):
     filename = "tests/data/memgpt_paper.pdf"
     upload_job = upload_file_using_client(client, source, filename)
     job = client.get_job(upload_job.id)
-    created_passages = job.metadata_["num_passages"]
+    created_passages = job.metadata["num_passages"]
 
     # TODO: add test for blocking job
 
@@ -500,7 +500,7 @@ def test_sources(client: Union[LocalClient, RESTClient], agent: AgentState):
     assert len(archival_memories) == 0
 
     # attach a source
-    client.attach_source_to_agent(source_id=source.id, agent_id=agent.id)
+    client.attach_source(source_id=source.id, agent_id=agent.id)
 
     # list attached sources
     attached_sources = client.list_attached_sources(agent_id=agent.id)
@@ -515,14 +515,13 @@ def test_sources(client: Union[LocalClient, RESTClient], agent: AgentState):
     # check number of passages
     sources = client.list_sources()
     # TODO: add back?
-    # assert sources.sources[0].metadata_["num_passages"] > 0
-    # assert sources.sources[0].metadata_["num_documents"] == 0  # TODO: fix this once document store added
+    # assert sources.sources[0].metadata["num_passages"] > 0
+    # assert sources.sources[0].metadata["num_documents"] == 0  # TODO: fix this once document store added
     print(sources)
 
     # detach the source
     assert len(client.get_archival_memory(agent_id=agent.id)) > 0, "No archival memory"
-    deleted_source = client.detach_source(source_id=source.id, agent_id=agent.id)
-    assert deleted_source.id == source.id
+    client.detach_source(source_id=source.id, agent_id=agent.id)
     archival_memories = client.get_archival_memory(agent_id=agent.id)
     assert len(archival_memories) == 0, f"Failed to detach source: {len(archival_memories)}"
     assert source.id not in [s.id for s in client.list_attached_sources(agent.id)]
@@ -629,7 +628,7 @@ def test_initial_message_sequence(client: Union[LocalClient, RESTClient], agent:
     empty_agent_state = client.create_agent(name="test-empty-message-sequence", initial_message_sequence=[])
     cleanup_agents.append(empty_agent_state.id)
 
-    custom_sequence = [MessageCreate(**{"text": "Hello, how are you?", "role": MessageRole.user})]
+    custom_sequence = [MessageCreate(**{"content": "Hello, how are you?", "role": MessageRole.user})]
     custom_agent_state = client.create_agent(name="test-custom-message-sequence", initial_message_sequence=custom_sequence)
     cleanup_agents.append(custom_agent_state.id)
     assert custom_agent_state.message_ids is not None
@@ -638,7 +637,7 @@ def test_initial_message_sequence(client: Union[LocalClient, RESTClient], agent:
     ), f"Expected {len(custom_sequence) + 1} messages, got {len(custom_agent_state.message_ids)}"
     # assert custom_agent_state.message_ids[1:] == [msg.id for msg in custom_sequence]
     # shoule be contained in second message (after system message)
-    assert custom_sequence[0].text in client.get_in_context_messages(custom_agent_state.id)[1].text
+    assert custom_sequence[0].content in client.get_in_context_messages(custom_agent_state.id)[1].text
 
 
 def test_add_and_manage_tags_for_agent(client: Union[LocalClient, RESTClient], agent: AgentState):

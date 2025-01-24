@@ -1,7 +1,7 @@
 import uuid
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import JSON, String
+from sqlalchemy import JSON, Index, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from letta.orm.block import Block
@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 class Agent(SqlalchemyBase, OrganizationMixin):
     __tablename__ = "agents"
     __pydantic_model__ = PydanticAgentState
+    __table_args__ = (Index("ix_agents_created_at", "created_at", "id"),)
 
     # agent generates its own id
     # TODO: We want to migrate all the ORM models to do this, so we will need to move this to the SqlalchemyBase
@@ -69,7 +70,14 @@ class Agent(SqlalchemyBase, OrganizationMixin):
     )
     tools: Mapped[List["Tool"]] = relationship("Tool", secondary="tools_agents", lazy="selectin", passive_deletes=True)
     sources: Mapped[List["Source"]] = relationship("Source", secondary="sources_agents", lazy="selectin")
-    core_memory: Mapped[List["Block"]] = relationship("Block", secondary="blocks_agents", lazy="selectin")
+    core_memory: Mapped[List["Block"]] = relationship(
+        "Block",
+        secondary="blocks_agents",
+        lazy="selectin",
+        passive_deletes=True,  # Ensures SQLAlchemy doesn't fetch blocks_agents rows before deleting
+        back_populates="agents",
+        doc="Blocks forming the core memory of the agent.",
+    )
     messages: Mapped[List["Message"]] = relationship(
         "Message",
         back_populates="agent",
@@ -113,14 +121,14 @@ class Agent(SqlalchemyBase, OrganizationMixin):
             "description": self.description,
             "message_ids": self.message_ids,
             "tools": self.tools,
-            "sources": self.sources,
+            "sources": [source.to_pydantic() for source in self.sources],
             "tags": [t.tag for t in self.tags],
             "tool_rules": self.tool_rules,
             "system": self.system,
             "agent_type": self.agent_type,
             "llm_config": self.llm_config,
             "embedding_config": self.embedding_config,
-            "metadata_": self.metadata_,
+            "metadata": self.metadata_,
             "memory": Memory(blocks=[b.to_pydantic() for b in self.core_memory]),
             "created_by_id": self.created_by_id,
             "last_updated_by_id": self.last_updated_by_id,

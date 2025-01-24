@@ -24,7 +24,7 @@ class ProviderManager:
             # Lazily create the provider id prior to persistence
             provider.resolve_identifier()
 
-            new_provider = ProviderModel(**provider.model_dump(exclude_unset=True))
+            new_provider = ProviderModel(**provider.model_dump(to_orm=True, exclude_unset=True))
             new_provider.create(session)
             return new_provider.to_pydantic()
 
@@ -36,7 +36,7 @@ class ProviderManager:
             existing_provider = ProviderModel.read(db_session=session, identifier=provider_update.id)
 
             # Update only the fields that are provided in ProviderUpdate
-            update_data = provider_update.model_dump(exclude_unset=True, exclude_none=True)
+            update_data = provider_update.model_dump(to_orm=True, exclude_unset=True, exclude_none=True)
             for key, value in update_data.items():
                 setattr(existing_provider, key, value)
 
@@ -59,11 +59,15 @@ class ProviderManager:
             session.commit()
 
     @enforce_types
-    def list_providers(self, cursor: Optional[str] = None, limit: Optional[int] = 50) -> List[PydanticProvider]:
-        """List providers with pagination using cursor (id) and limit."""
+    def list_providers(self, after: Optional[str] = None, limit: Optional[int] = 50) -> List[PydanticProvider]:
+        """List all providers with optional pagination."""
         with self.session_maker() as session:
-            results = ProviderModel.list(db_session=session, cursor=cursor, limit=limit)
-            return [provider.to_pydantic() for provider in results]
+            providers = ProviderModel.list(
+                db_session=session,
+                after=after,
+                limit=limit,
+            )
+            return [provider.to_pydantic() for provider in providers]
 
     @enforce_types
     def get_anthropic_override_provider_id(self) -> Optional[str]:

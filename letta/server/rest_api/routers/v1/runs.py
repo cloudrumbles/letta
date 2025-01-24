@@ -43,8 +43,8 @@ def list_active_runs(
     return [Run.from_job(job) for job in active_runs]
 
 
-@router.get("/{run_id}", response_model=Run, operation_id="get_run")
-def get_run(
+@router.get("/{run_id}", response_model=Run, operation_id="retrieve_run")
+def retrieve_run(
     run_id: str,
     user_id: Optional[str] = Header(None, alias="user_id"),
     server: "SyncServer" = Depends(get_letta_server),
@@ -69,15 +69,18 @@ RunMessagesResponse = Annotated[
 @router.get(
     "/{run_id}/messages",
     response_model=RunMessagesResponse,
-    operation_id="get_run_messages",
+    operation_id="list_run_messages",
 )
-async def get_run_messages(
+async def list_run_messages(
     run_id: str,
     server: "SyncServer" = Depends(get_letta_server),
     user_id: Optional[str] = Header(None, alias="user_id"),
-    cursor: Optional[str] = Query(None, description="Cursor for pagination"),
+    before: Optional[str] = Query(None, description="Cursor for pagination"),
+    after: Optional[str] = Query(None, description="Cursor for pagination"),
     limit: Optional[int] = Query(100, description="Maximum number of messages to return"),
-    ascending: bool = Query(True, description="Sort order by creation time"),
+    order: str = Query(
+        "desc", description="Sort order by the created_at timestamp of the objects. asc for ascending order and desc for descending order."
+    ),
     role: Optional[MessageRole] = Query(None, description="Filter by role"),
 ):
     """
@@ -85,9 +88,10 @@ async def get_run_messages(
 
     Args:
         run_id: ID of the run
-        cursor: Cursor for pagination
+        before: A cursor for use in pagination. `before` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, starting with obj_foo, your subsequent call can include before=obj_foo in order to fetch the previous page of the list.
+        after: A cursor for use in pagination. `after` is an object ID that defines your place in the list. For instance, if you make a list request and receive 100 objects, ending with obj_foo, your subsequent call can include after=obj_foo in order to fetch the next page of the list.
         limit: Maximum number of messages to return
-        ascending: Sort order by creation time
+        order: Sort order by the created_at timestamp of the objects. asc for ascending order and desc for descending order.
         role: Filter by role (user/assistant/system/tool)
         return_message_object: Whether to return Message objects or LettaMessage objects
         user_id: ID of the user making the request
@@ -95,15 +99,19 @@ async def get_run_messages(
     Returns:
         A list of messages associated with the run. Default is List[LettaMessage].
     """
+    if order not in ["asc", "desc"]:
+        raise HTTPException(status_code=400, detail="Order must be 'asc' or 'desc'")
+
     actor = server.user_manager.get_user_or_default(user_id=user_id)
 
     try:
-        messages = server.job_manager.get_run_messages_cursor(
+        messages = server.job_manager.get_run_messages(
             run_id=run_id,
             actor=actor,
             limit=limit,
-            cursor=cursor,
-            ascending=ascending,
+            before=before,
+            after=after,
+            ascending=(order == "asc"),
             role=role,
         )
         return messages
@@ -111,8 +119,8 @@ async def get_run_messages(
         raise HTTPException(status_code=404, detail=str(e))
 
 
-@router.get("/{run_id}/usage", response_model=UsageStatistics, operation_id="get_run_usage")
-def get_run_usage(
+@router.get("/{run_id}/usage", response_model=UsageStatistics, operation_id="retrieve_run_usage")
+def retrieve_run_usage(
     run_id: str,
     user_id: Optional[str] = Header(None, alias="user_id"),
     server: "SyncServer" = Depends(get_letta_server),

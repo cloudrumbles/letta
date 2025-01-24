@@ -45,7 +45,7 @@ agent_state = client.agents.create(
         ),
     ],
     # set automatic defaults for LLM/embedding config
-    llm="openai/gpt-4",
+    model="openai/gpt-4",
     embedding="openai/text-embedding-ada-002",
     # create the agent with an additional tool
     tool_ids=[tool.id],
@@ -64,7 +64,7 @@ response = client.agents.messages.send(
     messages=[
         MessageCreate(
             role="user",
-            text="roll a dice",
+            content="roll a dice",
         )
     ],
 )
@@ -88,7 +88,7 @@ agent_state = client.agents.create(
             value="username: sarah",
         ),
     ],
-    llm="openai/gpt-4",
+    model="openai/gpt-4",
     embedding="openai/text-embedding-ada-002",
     include_base_tools=False, 
     tool_ids=[tool.id, send_message_tool],
@@ -100,7 +100,7 @@ client.agents.messages.send(
     messages=[
         MessageCreate(
             role="user",
-            text="search your archival memory",
+            content="search your archival memory",
         )
     ],
 )

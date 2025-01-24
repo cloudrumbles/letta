@@ -3,6 +3,7 @@ import time
 from typing import Callable, Dict, Generator, List, Optional, Union
 
 import requests
+from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall as OpenAIToolCall
 
 import letta.utils
 from letta.constants import ADMIN_PREFIX, BASE_MEMORY_TOOLS, BASE_TOOLS, DEFAULT_HUMAN, DEFAULT_PERSONA, FUNCTION_RETURN_CHAR_LIMIT
@@ -29,7 +30,6 @@ from letta.schemas.llm_config import LLMConfig
 from letta.schemas.memory import ArchivalMemorySummary, ChatMemory, CreateArchivalMemory, Memory, RecallMemorySummary
 from letta.schemas.message import Message, MessageCreate, MessageUpdate
 from letta.schemas.openai.chat_completion_response import UsageStatistics
-from letta.schemas.openai.chat_completions import ToolCall
 from letta.schemas.organization import Organization
 from letta.schemas.passage import Passage
 from letta.schemas.run import Run
@@ -92,19 +92,19 @@ class AbstractClient(object):
     ):
         raise NotImplementedError
 
-    def get_tools_from_agent(self, agent_id: str):
+    def get_tools_from_agent(self, agent_id: str) -> List[Tool]:
         raise NotImplementedError
 
-    def add_tool_to_agent(self, agent_id: str, tool_id: str):
+    def attach_tool(self, agent_id: str, tool_id: str) -> AgentState:
         raise NotImplementedError
 
-    def remove_tool_from_agent(self, agent_id: str, tool_id: str):
+    def detach_tool(self, agent_id: str, tool_id: str) -> AgentState:
         raise NotImplementedError
 
-    def rename_agent(self, agent_id: str, new_name: str):
+    def rename_agent(self, agent_id: str, new_name: str) -> AgentState:
         raise NotImplementedError
 
-    def delete_agent(self, agent_id: str):
+    def delete_agent(self, agent_id: str) -> None:
         raise NotImplementedError
 
     def get_agent(self, agent_id: str) -> AgentState:
@@ -206,7 +206,7 @@ class AbstractClient(object):
     ) -> Tool:
         raise NotImplementedError
 
-    def list_tools(self, cursor: Optional[str] = None, limit: Optional[int] = 50) -> List[Tool]:
+    def list_tools(self, after: Optional[str] = None, limit: Optional[int] = 50) -> List[Tool]:
         raise NotImplementedError
 
     def get_tool(self, id: str) -> Tool:
@@ -216,6 +216,18 @@ class AbstractClient(object):
         raise NotImplementedError
 
     def get_tool_id(self, name: str) -> Optional[str]:
+        raise NotImplementedError
+
+    def list_attached_tools(self, agent_id: str) -> List[Tool]:
+        """
+        List all tools attached to an agent.
+
+        Args:
+            agent_id (str): ID of the agent
+
+        Returns:
+            List[Tool]: A list of attached tools
+        """
         raise NotImplementedError
 
     def upsert_base_tools(self) -> List[Tool]:
@@ -242,10 +254,10 @@ class AbstractClient(object):
     def get_source_id(self, source_name: str) -> str:
         raise NotImplementedError
 
-    def attach_source_to_agent(self, agent_id: str, source_id: Optional[str] = None, source_name: Optional[str] = None):
+    def attach_source(self, agent_id: str, source_id: Optional[str] = None, source_name: Optional[str] = None) -> AgentState:
         raise NotImplementedError
 
-    def detach_source_from_agent(self, agent_id: str, source_id: Optional[str] = None, source_name: Optional[str] = None):
+    def detach_source(self, agent_id: str, source_id: Optional[str] = None, source_name: Optional[str] = None) -> AgentState:
         raise NotImplementedError
 
     def list_sources(self) -> List[Source]:
@@ -254,7 +266,7 @@ class AbstractClient(object):
     def list_attached_sources(self, agent_id: str) -> List[Source]:
         raise NotImplementedError
 
-    def list_files_from_source(self, source_id: str, limit: int = 1000, cursor: Optional[str] = None) -> List[FileMetadata]:
+    def list_files_from_source(self, source_id: str, limit: int = 1000, after: Optional[str] = None) -> List[FileMetadata]:
         raise NotImplementedError
 
     def update_source(self, source_id: str, name: Optional[str] = None) -> Source:
@@ -267,12 +279,12 @@ class AbstractClient(object):
         raise NotImplementedError
 
     def get_archival_memory(
-        self, agent_id: str, before: Optional[str] = None, after: Optional[str] = None, limit: Optional[int] = 1000
+        self, agent_id: str, after: Optional[str] = None, before: Optional[str] = None, limit: Optional[int] = 1000
     ) -> List[Passage]:
         raise NotImplementedError
 
     def get_messages(
-        self, agent_id: str, before: Optional[str] = None, after: Optional[str] = None, limit: Optional[int] = 1000
+        self, agent_id: str, after: Optional[str] = None, before: Optional[str] = None, limit: Optional[int] = 1000
     ) -> List[Message]:
         raise NotImplementedError
 
@@ -285,7 +297,7 @@ class AbstractClient(object):
     def create_org(self, name: Optional[str] = None) -> Organization:
         raise NotImplementedError
 
-    def list_orgs(self, cursor: Optional[str] = None, limit: Optional[int] = 50) -> List[Organization]:
+    def list_orgs(self, after: Optional[str] = None, limit: Optional[int] = 50) -> List[Organization]:
         raise NotImplementedError
 
     def delete_org(self, org_id: str) -> Organization:
@@ -325,13 +337,13 @@ class AbstractClient(object):
         """
         raise NotImplementedError
 
-    def list_sandbox_configs(self, limit: int = 50, cursor: Optional[str] = None) -> List[SandboxConfig]:
+    def list_sandbox_configs(self, limit: int = 50, after: Optional[str] = None) -> List[SandboxConfig]:
         """
         List all sandbox configurations.
 
         Args:
             limit (int, optional): The maximum number of sandbox configurations to return. Defaults to 50.
-            cursor (Optional[str], optional): The pagination cursor for retrieving the next set of results.
+            after (Optional[str], optional): The pagination cursor for retrieving the next set of results.
 
         Returns:
             List[SandboxConfig]: A list of sandbox configurations.
@@ -382,7 +394,7 @@ class AbstractClient(object):
         raise NotImplementedError
 
     def list_sandbox_env_vars(
-        self, sandbox_config_id: str, limit: int = 50, cursor: Optional[str] = None
+        self, sandbox_config_id: str, limit: int = 50, after: Optional[str] = None
     ) -> List[SandboxEnvironmentVariable]:
         """
         List all environment variables associated with a sandbox configuration.
@@ -390,10 +402,30 @@ class AbstractClient(object):
         Args:
             sandbox_config_id (str): The ID of the sandbox configuration to retrieve environment variables for.
             limit (int, optional): The maximum number of environment variables to return. Defaults to 50.
-            cursor (Optional[str], optional): The pagination cursor for retrieving the next set of results.
+            after (Optional[str], optional): The pagination cursor for retrieving the next set of results.
 
         Returns:
             List[SandboxEnvironmentVariable]: A list of environment variables.
+        """
+        raise NotImplementedError
+
+    def attach_block(self, agent_id: str, block_id: str) -> AgentState:
+        """
+        Attach a block to an agent.
+
+        Args:
+            agent_id (str): ID of the agent
+            block_id (str): ID of the block to attach
+        """
+        raise NotImplementedError
+
+    def detach_block(self, agent_id: str, block_id: str) -> AgentState:
+        """
+        Detach a block from an agent.
+
+        Args:
+            agent_id (str): ID of the agent
+            block_id (str): ID of the block to detach
         """
         raise NotImplementedError
 
@@ -445,7 +477,12 @@ class RESTClient(AbstractClient):
         self._default_embedding_config = default_embedding_config
 
     def list_agents(
-        self, tags: Optional[List[str]] = None, query_text: Optional[str] = None, limit: int = 50, cursor: Optional[str] = None
+        self,
+        tags: Optional[List[str]] = None,
+        query_text: Optional[str] = None,
+        limit: int = 50,
+        before: Optional[str] = None,
+        after: Optional[str] = None,
     ) -> List[AgentState]:
         params = {"limit": limit}
         if tags:
@@ -455,11 +492,13 @@ class RESTClient(AbstractClient):
         if query_text:
             params["query_text"] = query_text
 
-        if cursor:
-            params["cursor"] = cursor
+        if before:
+            params["before"] = before
+
+        if after:
+            params["after"] = after
 
         response = requests.get(f"{self.base_url}/{self.api_prefix}/agents", headers=self.headers, params=params)
-        print(f"\nLIST RESPONSE\n{response.json()}\n")
         return [AgentState(**agent) for agent in response.json()]
 
     def agent_exists(self, agent_id: str) -> bool:
@@ -554,7 +593,7 @@ class RESTClient(AbstractClient):
         # create agent
         create_params = {
             "description": description,
-            "metadata_": metadata,
+            "metadata": metadata,
             "memory_blocks": [],
             "block_ids": [b.id for b in memory.get_blocks()] + block_ids,
             "tool_ids": tool_ids,
@@ -599,12 +638,12 @@ class RESTClient(AbstractClient):
         role: Optional[MessageRole] = None,
         text: Optional[str] = None,
         name: Optional[str] = None,
-        tool_calls: Optional[List[ToolCall]] = None,
+        tool_calls: Optional[List[OpenAIToolCall]] = None,
         tool_call_id: Optional[str] = None,
     ) -> Message:
         request = MessageUpdate(
             role=role,
-            text=text,
+            content=text,
             name=name,
             tool_calls=tool_calls,
             tool_call_id=tool_call_id,
@@ -628,7 +667,7 @@ class RESTClient(AbstractClient):
         embedding_config: Optional[EmbeddingConfig] = None,
         message_ids: Optional[List[str]] = None,
         tags: Optional[List[str]] = None,
-    ):
+    ) -> AgentState:
         """
         Update an existing agent
 
@@ -653,7 +692,7 @@ class RESTClient(AbstractClient):
             tool_ids=tool_ids,
             tags=tags,
             description=description,
-            metadata_=metadata,
+            metadata=metadata,
             llm_config=llm_config,
             embedding_config=embedding_config,
             message_ids=message_ids,
@@ -678,7 +717,7 @@ class RESTClient(AbstractClient):
             raise ValueError(f"Failed to get tools from agents: {response.text}")
         return [Tool(**tool) for tool in response.json()]
 
-    def add_tool_to_agent(self, agent_id: str, tool_id: str):
+    def attach_tool(self, agent_id: str, tool_id: str) -> AgentState:
         """
         Add tool to an existing agent
 
@@ -689,12 +728,12 @@ class RESTClient(AbstractClient):
         Returns:
             agent_state (AgentState): State of the updated agent
         """
-        response = requests.patch(f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/add-tool/{tool_id}", headers=self.headers)
+        response = requests.patch(f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/tools/attach/{tool_id}", headers=self.headers)
         if response.status_code != 200:
             raise ValueError(f"Failed to update agent: {response.text}")
         return AgentState(**response.json())
 
-    def remove_tool_from_agent(self, agent_id: str, tool_id: str):
+    def detach_tool(self, agent_id: str, tool_id: str) -> AgentState:
         """
         Removes tools from an existing agent
 
@@ -706,12 +745,12 @@ class RESTClient(AbstractClient):
             agent_state (AgentState): State of the updated agent
         """
 
-        response = requests.patch(f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/remove-tool/{tool_id}", headers=self.headers)
+        response = requests.patch(f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/tools/detach/{tool_id}", headers=self.headers)
         if response.status_code != 200:
             raise ValueError(f"Failed to update agent: {response.text}")
         return AgentState(**response.json())
 
-    def rename_agent(self, agent_id: str, new_name: str):
+    def rename_agent(self, agent_id: str, new_name: str) -> AgentState:
         """
         Rename an agent
 
@@ -719,10 +758,12 @@ class RESTClient(AbstractClient):
             agent_id (str): ID of the agent
             new_name (str): New name for the agent
 
+        Returns:
+            agent_state (AgentState): State of the updated agent
         """
         return self.update_agent(agent_id, name=new_name)
 
-    def delete_agent(self, agent_id: str):
+    def delete_agent(self, agent_id: str) -> None:
         """
         Delete an agent
 
@@ -776,7 +817,8 @@ class RESTClient(AbstractClient):
         Returns:
             memory (Memory): In-context memory of the agent
         """
-        response = requests.get(f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/memory", headers=self.headers)
+
+        response = requests.get(f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/core-memory", headers=self.headers)
         if response.status_code != 200:
             raise ValueError(f"Failed to get in-context memory: {response.text}")
         return Memory(**response.json())
@@ -797,7 +839,7 @@ class RESTClient(AbstractClient):
         """
         memory_update_dict = {section: value}
         response = requests.patch(
-            f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/memory", json=memory_update_dict, headers=self.headers
+            f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/core-memory", json=memory_update_dict, headers=self.headers
         )
         if response.status_code != 200:
             raise ValueError(f"Failed to update in-context memory: {response.text}")
@@ -814,10 +856,10 @@ class RESTClient(AbstractClient):
             summary (ArchivalMemorySummary): Summary of the archival memory
 
         """
-        response = requests.get(f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/memory/archival", headers=self.headers)
+        response = requests.get(f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/context", headers=self.headers)
         if response.status_code != 200:
             raise ValueError(f"Failed to get archival memory summary: {response.text}")
-        return ArchivalMemorySummary(**response.json())
+        return ArchivalMemorySummary(size=response.json().get("num_archival_memory", 0))
 
     def get_recall_memory_summary(self, agent_id: str) -> RecallMemorySummary:
         """
@@ -829,10 +871,10 @@ class RESTClient(AbstractClient):
         Returns:
             summary (RecallMemorySummary): Summary of the recall memory
         """
-        response = requests.get(f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/memory/recall", headers=self.headers)
+        response = requests.get(f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/context", headers=self.headers)
         if response.status_code != 200:
             raise ValueError(f"Failed to get recall memory summary: {response.text}")
-        return RecallMemorySummary(**response.json())
+        return RecallMemorySummary(size=response.json().get("num_recall_memory", 0))
 
     def get_in_context_messages(self, agent_id: str) -> List[Message]:
         """
@@ -844,10 +886,10 @@ class RESTClient(AbstractClient):
         Returns:
             messages (List[Message]): List of in-context messages
         """
-        response = requests.get(f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/memory/messages", headers=self.headers)
+        response = requests.get(f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/context", headers=self.headers)
         if response.status_code != 200:
-            raise ValueError(f"Failed to get in-context messages: {response.text}")
-        return [Message(**message) for message in response.json()]
+            raise ValueError(f"Failed to get recall memory summary: {response.text}")
+        return [Message(**message) for message in response.json().get("messages", "")]
 
     # agent interactions
 
@@ -889,7 +931,9 @@ class RESTClient(AbstractClient):
             params["before"] = str(before)
         if after:
             params["after"] = str(after)
-        response = requests.get(f"{self.base_url}/{self.api_prefix}/agents/{str(agent_id)}/archival", params=params, headers=self.headers)
+        response = requests.get(
+            f"{self.base_url}/{self.api_prefix}/agents/{str(agent_id)}/archival-memory", params=params, headers=self.headers
+        )
         assert response.status_code == 200, f"Failed to get archival memory: {response.text}"
         return [Passage(**passage) for passage in response.json()]
 
@@ -906,7 +950,7 @@ class RESTClient(AbstractClient):
         """
         request = CreateArchivalMemory(text=memory)
         response = requests.post(
-            f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/archival", headers=self.headers, json=request.model_dump()
+            f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/archival-memory", headers=self.headers, json=request.model_dump()
         )
         if response.status_code != 200:
             raise ValueError(f"Failed to insert archival memory: {response.text}")
@@ -920,7 +964,7 @@ class RESTClient(AbstractClient):
             agent_id (str): ID of the agent
             memory_id (str): ID of the memory
         """
-        response = requests.delete(f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/archival/{memory_id}", headers=self.headers)
+        response = requests.delete(f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/archival-memory/{memory_id}", headers=self.headers)
         assert response.status_code == 200, f"Failed to delete archival memory: {response.text}"
 
     # messages (recall memory)
@@ -972,7 +1016,7 @@ class RESTClient(AbstractClient):
             response (LettaResponse): Response from the agent
         """
         # TODO: implement include_full_message
-        messages = [MessageCreate(role=MessageRole(role), text=message, name=name)]
+        messages = [MessageCreate(role=MessageRole(role), content=message, name=name)]
         # TODO: figure out how to handle stream_steps and stream_tokens
 
         # When streaming steps is True, stream_tokens must be False
@@ -1019,7 +1063,7 @@ class RESTClient(AbstractClient):
         Returns:
             job (Job): Information about the async job
         """
-        messages = [MessageCreate(role=MessageRole(role), text=message, name=name)]
+        messages = [MessageCreate(role=MessageRole(role), content=message, name=name)]
 
         request = LettaRequest(messages=messages)
         response = requests.post(
@@ -1322,7 +1366,7 @@ class RESTClient(AbstractClient):
     def load_data(self, connector: DataConnector, source_name: str):
         raise NotImplementedError
 
-    def load_file_to_source(self, filename: str, source_id: str, blocking=True):
+    def load_file_to_source(self, filename: str, source_id: str, blocking=True) -> Job:
         """
         Load a file into a source
 
@@ -1390,20 +1434,20 @@ class RESTClient(AbstractClient):
             raise ValueError(f"Failed to list attached sources: {response.text}")
         return [Source(**source) for source in response.json()]
 
-    def list_files_from_source(self, source_id: str, limit: int = 1000, cursor: Optional[str] = None) -> List[FileMetadata]:
+    def list_files_from_source(self, source_id: str, limit: int = 1000, after: Optional[str] = None) -> List[FileMetadata]:
         """
         List files from source with pagination support.
 
         Args:
             source_id (str): ID of the source
             limit (int): Number of files to return
-            cursor (Optional[str]): Pagination cursor for fetching the next page
+            after (str): Get files after a certain time
 
         Returns:
             List[FileMetadata]: List of files
         """
         # Prepare query parameters for pagination
-        params = {"limit": limit, "cursor": cursor}
+        params = {"limit": limit, "after": after}
 
         # Make the request to the FastAPI endpoint
         response = requests.get(f"{self.base_url}/{self.api_prefix}/sources/{source_id}/files", headers=self.headers, params=params)
@@ -1431,7 +1475,7 @@ class RESTClient(AbstractClient):
             raise ValueError(f"Failed to update source: {response.text}")
         return Source(**response.json())
 
-    def attach_source_to_agent(self, source_id: str, agent_id: str):
+    def attach_source(self, source_id: str, agent_id: str) -> AgentState:
         """
         Attach a source to an agent
 
@@ -1441,15 +1485,20 @@ class RESTClient(AbstractClient):
             source_name (str): Name of the source
         """
         params = {"agent_id": agent_id}
-        response = requests.post(f"{self.base_url}/{self.api_prefix}/sources/{source_id}/attach", params=params, headers=self.headers)
+        response = requests.patch(
+            f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/sources/attach/{source_id}", params=params, headers=self.headers
+        )
         assert response.status_code == 200, f"Failed to attach source to agent: {response.text}"
+        return AgentState(**response.json())
 
-    def detach_source(self, source_id: str, agent_id: str):
+    def detach_source(self, source_id: str, agent_id: str) -> AgentState:
         """Detach a source from an agent"""
         params = {"agent_id": str(agent_id)}
-        response = requests.post(f"{self.base_url}/{self.api_prefix}/sources/{source_id}/detach", params=params, headers=self.headers)
+        response = requests.patch(
+            f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/sources/detach/{source_id}", params=params, headers=self.headers
+        )
         assert response.status_code == 200, f"Failed to detach source from agent: {response.text}"
-        return Source(**response.json())
+        return AgentState(**response.json())
 
     # tools
 
@@ -1463,12 +1512,29 @@ class RESTClient(AbstractClient):
         Returns:
             id (str): ID of the tool (`None` if not found)
         """
-        response = requests.get(f"{self.base_url}/{self.api_prefix}/tools/name/{tool_name}", headers=self.headers)
-        if response.status_code == 404:
-            return None
-        elif response.status_code != 200:
+        response = requests.get(f"{self.base_url}/{self.api_prefix}/tools", headers=self.headers)
+        if response.status_code != 200:
             raise ValueError(f"Failed to get tool: {response.text}")
-        return response.json()
+
+        tools = [tool for tool in [Tool(**tool) for tool in response.json()] if tool.name == tool_name]
+        if not tools:
+            return None
+        return tools[0].id
+
+    def list_attached_tools(self, agent_id: str) -> List[Tool]:
+        """
+        List all tools attached to an agent.
+
+        Args:
+            agent_id (str): ID of the agent
+
+        Returns:
+            List[Tool]: A list of attached tools
+        """
+        response = requests.get(f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/tools", headers=self.headers)
+        if response.status_code != 200:
+            raise ValueError(f"Failed to list attached tools: {response.text}")
+        return [Tool(**tool) for tool in response.json()]
 
     def upsert_base_tools(self) -> List[Tool]:
         response = requests.post(f"{self.base_url}/{self.api_prefix}/tools/add-base-tools/", headers=self.headers)
@@ -1581,7 +1647,7 @@ class RESTClient(AbstractClient):
             raise ValueError(f"Failed to update tool: {response.text}")
         return Tool(**response.json())
 
-    def list_tools(self, cursor: Optional[str] = None, limit: Optional[int] = 50) -> List[Tool]:
+    def list_tools(self, after: Optional[str] = None, limit: Optional[int] = 50) -> List[Tool]:
         """
         List available tools for the user.
 
@@ -1589,8 +1655,8 @@ class RESTClient(AbstractClient):
             tools (List[Tool]): List of tools
         """
         params = {}
-        if cursor:
-            params["cursor"] = str(cursor)
+        if after:
+            params["after"] = after
         if limit:
             params["limit"] = limit
 
@@ -1669,15 +1735,15 @@ class RESTClient(AbstractClient):
             raise ValueError(f"Failed to list embedding configs: {response.text}")
         return [EmbeddingConfig(**config) for config in response.json()]
 
-    def list_orgs(self, cursor: Optional[str] = None, limit: Optional[int] = 50) -> List[Organization]:
+    def list_orgs(self, after: Optional[str] = None, limit: Optional[int] = 50) -> List[Organization]:
         """
         Retrieves a list of all organizations in the database, with optional pagination.
 
-        @param cursor: the pagination cursor, if any
+        @param after: the pagination cursor, if any
         @param limit: the maximum number of organizations to retrieve
         @return: a list of Organization objects
         """
-        params = {"cursor": cursor, "limit": limit}
+        params = {"after": after, "limit": limit}
         response = requests.get(f"{self.base_url}/{ADMIN_PREFIX}/orgs", headers=self.headers, params=params)
         if response.status_code != 200:
             raise ValueError(f"Failed to retrieve organizations: {response.text}")
@@ -1720,6 +1786,12 @@ class RESTClient(AbstractClient):
     def create_sandbox_config(self, config: Union[LocalSandboxConfig, E2BSandboxConfig]) -> SandboxConfig:
         """
         Create a new sandbox configuration.
+
+        Args:
+            config (Union[LocalSandboxConfig, E2BSandboxConfig]): The sandbox settings.
+
+        Returns:
+            SandboxConfig: The created sandbox configuration.
         """
         payload = {
             "config": config.model_dump(),
@@ -1732,6 +1804,13 @@ class RESTClient(AbstractClient):
     def update_sandbox_config(self, sandbox_config_id: str, config: Union[LocalSandboxConfig, E2BSandboxConfig]) -> SandboxConfig:
         """
         Update an existing sandbox configuration.
+
+        Args:
+            sandbox_config_id (str): The ID of the sandbox configuration to update.
+            config (Union[LocalSandboxConfig, E2BSandboxConfig]): The updated sandbox settings.
+
+        Returns:
+            SandboxConfig: The updated sandbox configuration.
         """
         payload = {
             "config": config.model_dump(),
@@ -1748,6 +1827,9 @@ class RESTClient(AbstractClient):
     def delete_sandbox_config(self, sandbox_config_id: str) -> None:
         """
         Delete a sandbox configuration.
+
+        Args:
+            sandbox_config_id (str): The ID of the sandbox configuration to delete.
         """
         response = requests.delete(f"{self.base_url}/{self.api_prefix}/sandbox-config/{sandbox_config_id}", headers=self.headers)
         if response.status_code == 404:
@@ -1755,11 +1837,18 @@ class RESTClient(AbstractClient):
         elif response.status_code != 204:
             raise ValueError(f"Failed to delete sandbox config with ID '{sandbox_config_id}': {response.text}")
 
-    def list_sandbox_configs(self, limit: int = 50, cursor: Optional[str] = None) -> List[SandboxConfig]:
+    def list_sandbox_configs(self, limit: int = 50, after: Optional[str] = None) -> List[SandboxConfig]:
         """
         List all sandbox configurations.
+
+        Args:
+            limit (int, optional): The maximum number of sandbox configurations to return. Defaults to 50.
+            after (Optional[str], optional): The pagination cursor for retrieving the next set of results.
+
+        Returns:
+            List[SandboxConfig]: A list of sandbox configurations.
         """
-        params = {"limit": limit, "cursor": cursor}
+        params = {"limit": limit, "after": after}
         response = requests.get(f"{self.base_url}/{self.api_prefix}/sandbox-config", headers=self.headers, params=params)
         if response.status_code != 200:
             raise ValueError(f"Failed to list sandbox configs: {response.text}")
@@ -1770,6 +1859,15 @@ class RESTClient(AbstractClient):
     ) -> SandboxEnvironmentVariable:
         """
         Create a new environment variable for a sandbox configuration.
+
+        Args:
+            sandbox_config_id (str): The ID of the sandbox configuration to associate the environment variable with.
+            key (str): The name of the environment variable.
+            value (str): The value of the environment variable.
+            description (Optional[str], optional): A description of the environment variable. Defaults to None.
+
+        Returns:
+            SandboxEnvironmentVariable: The created environment variable.
         """
         payload = {"key": key, "value": value, "description": description}
         response = requests.post(
@@ -1786,6 +1884,15 @@ class RESTClient(AbstractClient):
     ) -> SandboxEnvironmentVariable:
         """
         Update an existing environment variable.
+
+        Args:
+            env_var_id (str): The ID of the environment variable to update.
+            key (Optional[str], optional): The updated name of the environment variable. Defaults to None.
+            value (Optional[str], optional): The updated value of the environment variable. Defaults to None.
+            description (Optional[str], optional): The updated description of the environment variable. Defaults to None.
+
+        Returns:
+            SandboxEnvironmentVariable: The updated environment variable.
         """
         payload = {k: v for k, v in {"key": key, "value": value, "description": description}.items() if v is not None}
         response = requests.patch(
@@ -1800,6 +1907,9 @@ class RESTClient(AbstractClient):
     def delete_sandbox_env_var(self, env_var_id: str) -> None:
         """
         Delete an environment variable by its ID.
+
+        Args:
+            env_var_id (str): The ID of the environment variable to delete.
         """
         response = requests.delete(
             f"{self.base_url}/{self.api_prefix}/sandbox-config/environment-variable/{env_var_id}", headers=self.headers
@@ -1810,12 +1920,20 @@ class RESTClient(AbstractClient):
             raise ValueError(f"Failed to delete environment variable with ID '{env_var_id}': {response.text}")
 
     def list_sandbox_env_vars(
-        self, sandbox_config_id: str, limit: int = 50, cursor: Optional[str] = None
+        self, sandbox_config_id: str, limit: int = 50, after: Optional[str] = None
     ) -> List[SandboxEnvironmentVariable]:
         """
         List all environment variables associated with a sandbox configuration.
+
+        Args:
+            sandbox_config_id (str): The ID of the sandbox configuration to retrieve environment variables for.
+            limit (int, optional): The maximum number of environment variables to return. Defaults to 50.
+            after (Optional[str], optional): The pagination cursor for retrieving the next set of results.
+
+        Returns:
+            List[SandboxEnvironmentVariable]: A list of environment variables.
         """
-        params = {"limit": limit, "cursor": cursor}
+        params = {"limit": limit, "after": after}
         response = requests.get(
             f"{self.base_url}/{self.api_prefix}/sandbox-config/{sandbox_config_id}/environment-variable",
             headers=self.headers,
@@ -1839,68 +1957,38 @@ class RESTClient(AbstractClient):
         block = self.get_agent_memory_block(agent_id, current_label)
         return self.update_block(block.id, label=new_label)
 
-    # TODO: remove this
-    def add_agent_memory_block(self, agent_id: str, create_block: CreateBlock) -> Memory:
+    def attach_block(self, agent_id: str, block_id: str) -> AgentState:
         """
-        Create and link a memory block to an agent's core memory
+        Attach a block to an agent.
 
         Args:
-            agent_id (str): The agent ID
-            create_block (CreateBlock): The block to create
-
-        Returns:
-            memory (Memory): The updated memory
+            agent_id (str): ID of the agent
+            block_id (str): ID of the block to attach
         """
-        response = requests.post(
-            f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/memory/block",
-            headers=self.headers,
-            json=create_block.model_dump(),
-        )
-        if response.status_code != 200:
-            raise ValueError(f"Failed to add agent memory block: {response.text}")
-        return Memory(**response.json())
-
-    def link_agent_memory_block(self, agent_id: str, block_id: str) -> Memory:
-        """
-        Link a block to an agent's core memory
-
-        Args:
-            agent_id (str): The agent ID
-            block_id (str): The block ID
-
-        Returns:
-            memory (Memory): The updated memory
-        """
-        params = {"agent_id": agent_id}
         response = requests.patch(
-            f"{self.base_url}/{self.api_prefix}/blocks/{block_id}/attach",
-            params=params,
+            f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/core-memory/blocks/attach/{block_id}",
             headers=self.headers,
         )
         if response.status_code != 200:
-            raise ValueError(f"Failed to link agent memory block: {response.text}")
-        return Block(**response.json())
+            raise ValueError(f"Failed to attach block to agent: {response.text}")
+        return AgentState(**response.json())
 
-    def remove_agent_memory_block(self, agent_id: str, block_label: str) -> Memory:
+    def detach_block(self, agent_id: str, block_id: str) -> AgentState:
         """
-        Unlike a block from the agent's core memory
+        Detach a block from an agent.
 
         Args:
-            agent_id (str): The agent ID
-            block_label (str): The block label
-
-        Returns:
-            memory (Memory): The updated memory
+            agent_id (str): ID of the agent
+            block_id (str): ID of the block to detach
         """
-        response = requests.delete(
-            f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/memory/block/{block_label}",
-            headers=self.headers,
+        response = requests.patch(
+            f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/core-memory/blocks/detach/{block_id}", headers=self.headers
         )
         if response.status_code != 200:
-            raise ValueError(f"Failed to remove agent memory block: {response.text}")
-        return Memory(**response.json())
+            raise ValueError(f"Failed to detach block from agent: {response.text}")
+        return AgentState(**response.json())
 
-    def get_agent_memory_blocks(self, agent_id: str) -> List[Block]:
+    def list_agent_memory_blocks(self, agent_id: str) -> List[Block]:
         """
         Get all the blocks in the agent's core memory
 
@@ -1910,7 +1998,7 @@ class RESTClient(AbstractClient):
         Returns:
             blocks (List[Block]): The blocks in the agent's core memory
         """
-        response = requests.get(f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/memory/block", headers=self.headers)
+        response = requests.get(f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/core-memory/blocks", headers=self.headers)
         if response.status_code != 200:
             raise ValueError(f"Failed to get agent memory blocks: {response.text}")
         return [Block(**block) for block in response.json()]
@@ -1927,7 +2015,7 @@ class RESTClient(AbstractClient):
             block (Block): The block corresponding to the label
         """
         response = requests.get(
-            f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/memory/block/{label}",
+            f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/core-memory/blocks/{label}",
             headers=self.headers,
         )
         if response.status_code != 200:
@@ -1960,7 +2048,7 @@ class RESTClient(AbstractClient):
         if limit:
             data["limit"] = limit
         response = requests.patch(
-            f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/memory/block/{label}",
+            f"{self.base_url}/{self.api_prefix}/agents/{agent_id}/core-memory/blocks/{label}",
             headers=self.headers,
             json=data,
         )
@@ -2006,7 +2094,8 @@ class RESTClient(AbstractClient):
     def get_run_messages(
         self,
         run_id: str,
-        cursor: Optional[str] = None,
+        before: Optional[str] = None,
+        after: Optional[str] = None,
         limit: Optional[int] = 100,
         ascending: bool = True,
         role: Optional[MessageRole] = None,
@@ -2016,7 +2105,8 @@ class RESTClient(AbstractClient):
 
         Args:
             job_id: ID of the job
-            cursor: Cursor for pagination
+            before: Cursor for pagination
+            after: Cursor for pagination
             limit: Maximum number of messages to return
             ascending: Sort order by creation time
             role: Filter by message role (user/assistant/system/tool)
@@ -2024,7 +2114,8 @@ class RESTClient(AbstractClient):
             List of messages matching the filter criteria
         """
         params = {
-            "cursor": cursor,
+            "before": before,
+            "after": after,
             "limit": limit,
             "ascending": ascending,
             "role": role,
@@ -2122,15 +2213,15 @@ class RESTClient(AbstractClient):
 
     def get_tags(
         self,
-        cursor: Optional[str] = None,
-        limit: Optional[int] = None,
+        after: Optional[str] = None,
+        limit: int = 100,
         query_text: Optional[str] = None,
     ) -> List[str]:
         """
         Get a list of all unique tags.
 
         Args:
-            cursor: Optional cursor for pagination (last tag seen)
+            after: Optional cursor for pagination (first tag seen)
             limit: Optional maximum number of tags to return
             query_text: Optional text to filter tags
 
@@ -2138,8 +2229,8 @@ class RESTClient(AbstractClient):
             List[str]: List of unique tags
         """
         params = {}
-        if cursor:
-            params["cursor"] = cursor
+        if after:
+            params["after"] = after
         if limit:
             params["limit"] = limit
         if query_text:
@@ -2209,11 +2300,18 @@ class LocalClient(AbstractClient):
 
     # agents
     def list_agents(
-        self, query_text: Optional[str] = None, tags: Optional[List[str]] = None, limit: int = 100, cursor: Optional[str] = None
+        self,
+        query_text: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        limit: int = 100,
+        before: Optional[str] = None,
+        after: Optional[str] = None,
     ) -> List[AgentState]:
         self.interface.clear()
 
-        return self.server.agent_manager.list_agents(actor=self.user, tags=tags, query_text=query_text, limit=limit, cursor=cursor)
+        return self.server.agent_manager.list_agents(
+            actor=self.user, tags=tags, query_text=query_text, limit=limit, before=before, after=after
+        )
 
     def agent_exists(self, agent_id: Optional[str] = None, agent_name: Optional[str] = None) -> bool:
         """
@@ -2303,7 +2401,7 @@ class LocalClient(AbstractClient):
         # Create the base parameters
         create_params = {
             "description": description,
-            "metadata_": metadata,
+            "metadata": metadata,
             "memory_blocks": [],
             "block_ids": [b.id for b in memory.get_blocks()] + block_ids,
             "tool_ids": tool_ids,
@@ -2337,7 +2435,7 @@ class LocalClient(AbstractClient):
         role: Optional[MessageRole] = None,
         text: Optional[str] = None,
         name: Optional[str] = None,
-        tool_calls: Optional[List[ToolCall]] = None,
+        tool_calls: Optional[List[OpenAIToolCall]] = None,
         tool_call_id: Optional[str] = None,
     ) -> Message:
         message = self.server.update_agent_message(
@@ -2345,7 +2443,7 @@ class LocalClient(AbstractClient):
             message_id=message_id,
             request=MessageUpdate(
                 role=role,
-                text=text,
+                content=text,
                 name=name,
                 tool_calls=tool_calls,
                 tool_call_id=tool_call_id,
@@ -2385,7 +2483,7 @@ class LocalClient(AbstractClient):
         Returns:
             agent_state (AgentState): State of the updated agent
         """
-        # TODO: add the abilitty to reset linked block_ids
+        # TODO: add the ability to reset linked block_ids
         self.interface.clear()
         agent_state = self.server.agent_manager.update_agent(
             agent_id,
@@ -2395,7 +2493,7 @@ class LocalClient(AbstractClient):
                 tool_ids=tool_ids,
                 tags=tags,
                 description=description,
-                metadata_=metadata,
+                metadata=metadata,
                 llm_config=llm_config,
                 embedding_config=embedding_config,
                 message_ids=message_ids,
@@ -2417,7 +2515,7 @@ class LocalClient(AbstractClient):
         self.interface.clear()
         return self.server.agent_manager.get_agent_by_id(agent_id=agent_id, actor=self.user).tools
 
-    def add_tool_to_agent(self, agent_id: str, tool_id: str):
+    def attach_tool(self, agent_id: str, tool_id: str) -> AgentState:
         """
         Add tool to an existing agent
 
@@ -2432,7 +2530,7 @@ class LocalClient(AbstractClient):
         agent_state = self.server.agent_manager.attach_tool(agent_id=agent_id, tool_id=tool_id, actor=self.user)
         return agent_state
 
-    def remove_tool_from_agent(self, agent_id: str, tool_id: str):
+    def detach_tool(self, agent_id: str, tool_id: str) -> AgentState:
         """
         Removes tools from an existing agent
 
@@ -2447,17 +2545,20 @@ class LocalClient(AbstractClient):
         agent_state = self.server.agent_manager.detach_tool(agent_id=agent_id, tool_id=tool_id, actor=self.user)
         return agent_state
 
-    def rename_agent(self, agent_id: str, new_name: str):
+    def rename_agent(self, agent_id: str, new_name: str) -> AgentState:
         """
         Rename an agent
 
         Args:
             agent_id (str): ID of the agent
             new_name (str): New name for the agent
-        """
-        self.update_agent(agent_id, name=new_name)
 
-    def delete_agent(self, agent_id: str):
+        Returns:
+            agent_state (AgentState): State of the updated agent
+        """
+        return self.update_agent(agent_id, name=new_name)
+
+    def delete_agent(self, agent_id: str) -> None:
         """
         Delete an agent
 
@@ -2641,7 +2742,7 @@ class LocalClient(AbstractClient):
         usage = self.server.send_messages(
             actor=self.user,
             agent_id=agent_id,
-            messages=[MessageCreate(role=MessageRole(role), text=message, name=name)],
+            messages=[MessageCreate(role=MessageRole(role), content=message, name=name)],
         )
 
         ## TODO: need to make sure date/timestamp is propely passed
@@ -2870,7 +2971,7 @@ class LocalClient(AbstractClient):
 
     def load_composio_tool(self, action: "ActionType") -> Tool:
         tool_create = ToolCreate.from_composio(action_name=action.name)
-        return self.server.tool_manager.create_or_update_tool(pydantic_tool=Tool(**tool_create.model_dump()), actor=self.user)
+        return self.server.tool_manager.create_or_update_composio_tool(pydantic_tool=Tool(**tool_create.model_dump()), actor=self.user)
 
     def create_tool(
         self,
@@ -2958,7 +3059,7 @@ class LocalClient(AbstractClient):
         id: str,
         name: Optional[str] = None,
         description: Optional[str] = None,
-        func: Optional[callable] = None,
+        func: Optional[Callable] = None,
         tags: Optional[List[str]] = None,
         return_char_limit: int = FUNCTION_RETURN_CHAR_LIMIT,
     ) -> Tool:
@@ -2989,14 +3090,14 @@ class LocalClient(AbstractClient):
 
         return self.server.tool_manager.update_tool_by_id(tool_id=id, tool_update=ToolUpdate(**update_data), actor=self.user)
 
-    def list_tools(self, cursor: Optional[str] = None, limit: Optional[int] = 50) -> List[Tool]:
+    def list_tools(self, after: Optional[str] = None, limit: Optional[int] = 50) -> List[Tool]:
         """
         List available tools for the user.
 
         Returns:
             tools (List[Tool]): List of tools
         """
-        return self.server.tool_manager.list_tools(cursor=cursor, limit=limit, actor=self.user)
+        return self.server.tool_manager.list_tools(after=after, limit=limit, actor=self.user)
 
     def get_tool(self, id: str) -> Optional[Tool]:
         """
@@ -3032,6 +3133,18 @@ class LocalClient(AbstractClient):
         tool = self.server.tool_manager.get_tool_by_name(tool_name=name, actor=self.user)
         return tool.id if tool else None
 
+    def list_attached_tools(self, agent_id: str) -> List[Tool]:
+        """
+        List all tools attached to an agent.
+
+        Args:
+            agent_id (str): ID of the agent
+
+        Returns:
+            List[Tool]: List of tools attached to the agent
+        """
+        return self.server.agent_manager.list_attached_tools(agent_id=agent_id, actor=self.user)
+
     def load_data(self, connector: DataConnector, source_name: str):
         """
         Load data into a source
@@ -3057,7 +3170,7 @@ class LocalClient(AbstractClient):
         job = Job(
             user_id=self.user_id,
             status=JobStatus.created,
-            metadata_={"type": "embedding", "filename": filename, "source_id": source_id},
+            metadata={"type": "embedding", "filename": filename, "source_id": source_id},
         )
         job = self.server.job_manager.create_job(pydantic_job=job, actor=self.user)
 
@@ -3065,14 +3178,14 @@ class LocalClient(AbstractClient):
         self.server.load_file_to_source(source_id=source_id, file_path=filename, job_id=job.id, actor=self.user)
         return job
 
-    def delete_file_from_source(self, source_id: str, file_id: str):
+    def delete_file_from_source(self, source_id: str, file_id: str) -> None:
         self.server.source_manager.delete_file(file_id, actor=self.user)
 
     def get_job(self, job_id: str):
         return self.server.job_manager.get_job_by_id(job_id=job_id, actor=self.user)
 
     def delete_job(self, job_id: str):
-        return self.server.job_manager.delete_job(job_id=job_id, actor=self.user)
+        return self.server.job_manager.delete_job_by_id(job_id=job_id, actor=self.user)
 
     def list_jobs(self):
         return self.server.job_manager.list_jobs(actor=self.user)
@@ -3131,7 +3244,7 @@ class LocalClient(AbstractClient):
         """
         return self.server.source_manager.get_source_by_name(source_name=source_name, actor=self.user).id
 
-    def attach_source_to_agent(self, agent_id: str, source_id: Optional[str] = None, source_name: Optional[str] = None):
+    def attach_source(self, agent_id: str, source_id: Optional[str] = None, source_name: Optional[str] = None) -> AgentState:
         """
         Attach a source to an agent
 
@@ -3144,9 +3257,9 @@ class LocalClient(AbstractClient):
             source = self.server.source_manager.get_source_by_id(source_id=source_id, actor=self.user)
             source_id = source.id
 
-        self.server.agent_manager.attach_source(source_id=source_id, agent_id=agent_id, actor=self.user)
+        return self.server.agent_manager.attach_source(source_id=source_id, agent_id=agent_id, actor=self.user)
 
-    def detach_source_from_agent(self, agent_id: str, source_id: Optional[str] = None, source_name: Optional[str] = None):
+    def detach_source(self, agent_id: str, source_id: Optional[str] = None, source_name: Optional[str] = None) -> AgentState:
         """
         Detach a source from an agent by removing all `Passage` objects that were loaded from the source from archival memory.
         Args:
@@ -3183,19 +3296,19 @@ class LocalClient(AbstractClient):
         """
         return self.server.agent_manager.list_attached_sources(agent_id=agent_id, actor=self.user)
 
-    def list_files_from_source(self, source_id: str, limit: int = 1000, cursor: Optional[str] = None) -> List[FileMetadata]:
+    def list_files_from_source(self, source_id: str, limit: int = 1000, after: Optional[str] = None) -> List[FileMetadata]:
         """
         List files from source.
 
         Args:
             source_id (str): ID of the source
             limit (int): The # of items to return
-            cursor (str): The cursor for fetching the next page
+            after (str): The cursor for fetching the next page
 
         Returns:
             files (List[FileMetadata]): List of files
         """
-        return self.server.source_manager.list_files(source_id=source_id, limit=limit, cursor=cursor, actor=self.user)
+        return self.server.source_manager.list_files(source_id=source_id, limit=limit, after=after, actor=self.user)
 
     def update_source(self, source_id: str, name: Optional[str] = None) -> Source:
         """
@@ -3253,17 +3366,20 @@ class LocalClient(AbstractClient):
             passages (List[Passage]): List of passages
         """
 
-        return self.server.get_agent_archival_cursor(user_id=self.user_id, agent_id=agent_id, limit=limit)
+        return self.server.get_agent_archival(user_id=self.user_id, agent_id=agent_id, limit=limit)
 
     # recall memory
 
-    def get_messages(self, agent_id: str, cursor: Optional[str] = None, limit: Optional[int] = 1000) -> List[Message]:
+    def get_messages(
+        self, agent_id: str, before: Optional[str] = None, after: Optional[str] = None, limit: Optional[int] = 1000
+    ) -> List[Message]:
         """
         Get messages from an agent with pagination.
 
         Args:
             agent_id (str): ID of the agent
-            cursor (str): Get messages after a certain time
+            before (str): Get messages before a certain time
+            after (str): Get messages after a certain time
             limit (int): Limit number of messages
 
         Returns:
@@ -3271,10 +3387,11 @@ class LocalClient(AbstractClient):
         """
 
         self.interface.clear()
-        return self.server.get_agent_recall_cursor(
+        return self.server.get_agent_recall(
             user_id=self.user_id,
             agent_id=agent_id,
-            before=cursor,
+            before=before,
+            after=after,
             limit=limit,
             reverse=True,
         )
@@ -3393,8 +3510,8 @@ class LocalClient(AbstractClient):
     def create_org(self, name: Optional[str] = None) -> Organization:
         return self.server.organization_manager.create_organization(pydantic_org=Organization(name=name))
 
-    def list_orgs(self, cursor: Optional[str] = None, limit: Optional[int] = 50) -> List[Organization]:
-        return self.server.organization_manager.list_organizations(cursor=cursor, limit=limit)
+    def list_orgs(self, after: Optional[str] = None, limit: Optional[int] = 50) -> List[Organization]:
+        return self.server.organization_manager.list_organizations(limit=limit, after=after)
 
     def delete_org(self, org_id: str) -> Organization:
         return self.server.organization_manager.delete_organization_by_id(org_id=org_id)
@@ -3421,11 +3538,11 @@ class LocalClient(AbstractClient):
         """
         return self.server.sandbox_config_manager.delete_sandbox_config(sandbox_config_id=sandbox_config_id, actor=self.user)
 
-    def list_sandbox_configs(self, limit: int = 50, cursor: Optional[str] = None) -> List[SandboxConfig]:
+    def list_sandbox_configs(self, limit: int = 50, after: Optional[str] = None) -> List[SandboxConfig]:
         """
         List all sandbox configurations.
         """
-        return self.server.sandbox_config_manager.list_sandbox_configs(actor=self.user, limit=limit, cursor=cursor)
+        return self.server.sandbox_config_manager.list_sandbox_configs(actor=self.user, limit=limit, after=after)
 
     def create_sandbox_env_var(
         self, sandbox_config_id: str, key: str, value: str, description: Optional[str] = None
@@ -3456,13 +3573,13 @@ class LocalClient(AbstractClient):
         return self.server.sandbox_config_manager.delete_sandbox_env_var(env_var_id=env_var_id, actor=self.user)
 
     def list_sandbox_env_vars(
-        self, sandbox_config_id: str, limit: int = 50, cursor: Optional[str] = None
+        self, sandbox_config_id: str, limit: int = 50, after: Optional[str] = None
     ) -> List[SandboxEnvironmentVariable]:
         """
         List all environment variables associated with a sandbox configuration.
         """
         return self.server.sandbox_config_manager.list_sandbox_env_vars(
-            sandbox_config_id=sandbox_config_id, actor=self.user, limit=limit, cursor=cursor
+            sandbox_config_id=sandbox_config_id, actor=self.user, limit=limit, after=after
         )
 
     def update_agent_memory_block_label(self, agent_id: str, current_label: str, new_label: str) -> Memory:
@@ -3478,50 +3595,6 @@ class LocalClient(AbstractClient):
         """
         block = self.get_agent_memory_block(agent_id, current_label)
         return self.update_block(block.id, label=new_label)
-
-    # TODO: remove this
-    def add_agent_memory_block(self, agent_id: str, create_block: CreateBlock) -> Memory:
-        """
-        Create and link a memory block to an agent's core memory
-
-        Args:
-            agent_id (str): The agent ID
-            create_block (CreateBlock): The block to create
-
-        Returns:
-            memory (Memory): The updated memory
-        """
-        block_req = Block(**create_block.model_dump())
-        block = self.server.block_manager.create_or_update_block(actor=self.user, block=block_req)
-        # Link the block to the agent
-        agent = self.server.agent_manager.attach_block(agent_id=agent_id, block_id=block.id, actor=self.user)
-        return agent.memory
-
-    def link_agent_memory_block(self, agent_id: str, block_id: str) -> Memory:
-        """
-        Link a block to an agent's core memory
-
-        Args:
-            agent_id (str): The agent ID
-            block_id (str): The block ID
-
-        Returns:
-            memory (Memory): The updated memory
-        """
-        return self.server.agent_manager.attach_block(agent_id=agent_id, block_id=block_id, actor=self.user)
-
-    def remove_agent_memory_block(self, agent_id: str, block_label: str) -> Memory:
-        """
-        Unlike a block from the agent's core memory
-
-        Args:
-            agent_id (str): The agent ID
-            block_label (str): The block label
-
-        Returns:
-            memory (Memory): The updated memory
-        """
-        return self.server.agent_manager.detach_block_with_label(agent_id=agent_id, block_label=block_label, actor=self.user)
 
     def get_agent_memory_blocks(self, agent_id: str) -> List[Block]:
         """
@@ -3604,10 +3677,31 @@ class LocalClient(AbstractClient):
             data["label"] = label
         return self.server.block_manager.update_block(block_id, actor=self.user, block_update=BlockUpdate(**data))
 
+    def attach_block(self, agent_id: str, block_id: str) -> AgentState:
+        """
+        Attach a block to an agent.
+
+        Args:
+            agent_id (str): ID of the agent
+            block_id (str): ID of the block to attach
+        """
+        return self.server.agent_manager.attach_block(agent_id=agent_id, block_id=block_id, actor=self.user)
+
+    def detach_block(self, agent_id: str, block_id: str) -> AgentState:
+        """
+        Detach a block from an agent.
+
+        Args:
+            agent_id (str): ID of the agent
+            block_id (str): ID of the block to detach
+        """
+        return self.server.agent_manager.detach_block(agent_id=agent_id, block_id=block_id, actor=self.user)
+
     def get_run_messages(
         self,
         run_id: str,
-        cursor: Optional[str] = None,
+        before: Optional[str] = None,
+        after: Optional[str] = None,
         limit: Optional[int] = 100,
         ascending: bool = True,
         role: Optional[MessageRole] = None,
@@ -3617,21 +3711,23 @@ class LocalClient(AbstractClient):
 
         Args:
             run_id: ID of the run
-            cursor: Cursor for pagination
+            before: Cursor for pagination
+            after: Cursor for pagination
             limit: Maximum number of messages to return
             ascending: Sort order by creation time
             role: Filter by message role (user/assistant/system/tool)
-
         Returns:
             List of messages matching the filter criteria
         """
         params = {
-            "cursor": cursor,
+            "before": before,
+            "after": after,
             "limit": limit,
             "ascending": ascending,
             "role": role,
         }
-        return self.server.job_manager.get_run_messages_cursor(run_id=run_id, actor=self.user, **params)
+
+        return self.server.job_manager.get_run_messages(run_id=run_id, actor=self.user, **params)
 
     def get_run_usage(
         self,
@@ -3693,9 +3789,9 @@ class LocalClient(AbstractClient):
 
     def get_tags(
         self,
-        cursor: str = None,
-        limit: int = 100,
-        query_text: str = None,
+        after: Optional[str] = None,
+        limit: Optional[int] = None,
+        query_text: Optional[str] = None,
     ) -> List[str]:
         """
         Get all tags.
@@ -3703,4 +3799,4 @@ class LocalClient(AbstractClient):
         Returns:
             tags (List[str]): List of tags
         """
-        return self.server.agent_manager.list_tags(actor=self.user, cursor=cursor, limit=limit, query_text=query_text)
+        return self.server.agent_manager.list_tags(actor=self.user, after=after, limit=limit, query_text=query_text)

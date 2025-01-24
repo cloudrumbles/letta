@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "letta"
-version = "0.6.12"
+version = "0.6.15"
 packages = [
     {include = "letta"},
 ]
@@ -78,7 +78,10 @@ llama-index-embeddings-openai = "^0.3.1"
 e2b-code-interpreter = {version = "^1.0.3", optional = true}
 anthropic = "^0.43.0"
 letta_client = "^0.1.16"
+openai = "^1.60.0"
 colorama = "^0.4.6"
+
+
 
 [tool.poetry.extras]
 postgres = ["pgvector", "pg8000", "psycopg2-binary", "psycopg2"]
@@ -95,6 +98,7 @@ bedrock = ["boto3"]
 black = "^24.4.2"
 ipykernel = "^6.29.5"
 ipdb = "^0.13.13"
+pytest-mock = "^3.14.0"
 
 [tool.black]
 line-length = 140

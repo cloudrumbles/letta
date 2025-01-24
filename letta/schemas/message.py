@@ -2,26 +2,36 @@ import copy
 import json
 import warnings
 from datetime import datetime, timezone
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, field_validator
+from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall as OpenAIToolCall
+from openai.types.chat.chat_completion_message_tool_call import Function as OpenAIFunction
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from letta.constants import DEFAULT_MESSAGE_TOOL, DEFAULT_MESSAGE_TOOL_KWARG, TOOL_CALL_ID_MAX_LEN
 from letta.local_llm.constants import INNER_THOUGHTS_KWARG
-from letta.schemas.enums import MessageRole
+from letta.schemas.enums import MessageContentType, MessageRole
 from letta.schemas.letta_base import OrmMetadataBase
-from letta.schemas.letta_message import AssistantMessage, LettaMessage, ReasoningMessage, SystemMessage
-from letta.schemas.letta_message import ToolCall as LettaToolCall
-from letta.schemas.letta_message import ToolCallMessage, ToolReturnMessage, UserMessage
-from letta.schemas.openai.chat_completions import ToolCall, ToolCallFunction
+from letta.schemas.letta_message import (
+    AssistantMessage,
+    LettaMessage,
+    MessageContentUnion,
+    ReasoningMessage,
+    SystemMessage,
+    TextContent,
+    ToolCall,
+    ToolCallMessage,
+    ToolReturnMessage,
+    UserMessage,
+)
 from letta.utils import get_utc_time, is_utc_datetime, json_dumps
 
 
 def add_inner_thoughts_to_tool_call(
-    tool_call: ToolCall,
+    tool_call: OpenAIToolCall,
     inner_thoughts: str,
     inner_thoughts_key: str,
-) -> ToolCall:
+) -> OpenAIToolCall:
     """Add inner thoughts (arg + value) to a tool call"""
     # because the kwargs are stored as strings, we need to load then write the JSON dicts
     try:
@@ -51,7 +61,7 @@ class MessageCreate(BaseModel):
         MessageRole.user,
         MessageRole.system,
     ] = Field(..., description="The role of the participant.")
-    text: str = Field(..., description="The text of the message.")
+    content: Union[str, List[MessageContentUnion]] = Field(..., description="The content of the message.")
     name: Optional[str] = Field(None, description="The name of the participant.")
 
 
@@ -59,7 +69,7 @@ class MessageUpdate(BaseModel):
     """Request to update a message"""
 
     role: Optional[MessageRole] = Field(None, description="The role of the participant.")
-    text: Optional[str] = Field(None, description="The text of the message.")
+    content: Optional[Union[str, List[MessageContentUnion]]] = Field(..., description="The content of the message.")
     # NOTE: probably doesn't make sense to allow remapping user_id or agent_id (vs creating a new message)
     # user_id: Optional[str] = Field(None, description="The unique identifier of the user.")
     # agent_id: Optional[str] = Field(None, description="The unique identifier of the agent.")
@@ -68,8 +78,20 @@ class MessageUpdate(BaseModel):
     name: Optional[str] = Field(None, description="The name of the participant.")
     # NOTE: we probably shouldn't allow updating the created_at field, right?
     # created_at: Optional[datetime] = Field(None, description="The time the message was created.")
-    tool_calls: Optional[List[ToolCall]] = Field(None, description="The list of tool calls requested.")
+    tool_calls: Optional[List[OpenAIToolCall,]] = Field(None, description="The list of tool calls requested.")
     tool_call_id: Optional[str] = Field(None, description="The id of the tool call.")
+
+    def model_dump(self, to_orm: bool = False, **kwargs) -> Dict[str, Any]:
+        data = super().model_dump(**kwargs)
+        if to_orm and "content" in data:
+            if isinstance(data["content"], str):
+                data["text"] = data["content"]
+            else:
+                for content in data["content"]:
+                    if content["type"] == "text":
+                        data["text"] = content["text"]
+            del data["content"]
+        return data
 
 
 class Message(BaseMessage):
@@ -85,21 +107,22 @@ class Message(BaseMessage):
         model (str): The model used to make the function call.
         name (str): The name of the participant.
         created_at (datetime): The time the message was created.
-        tool_calls (List[ToolCall]): The list of tool calls requested.
+        tool_calls (List[OpenAIToolCall,]): The list of tool calls requested.
         tool_call_id (str): The id of the tool call.
 
     """
 
     id: str = BaseMessage.generate_id_field()
     role: MessageRole = Field(..., description="The role of the participant.")
-    text: Optional[str] = Field(None, description="The text of the message.")
+    content: Optional[List[MessageContentUnion]] = Field(None, description="The content of the message.")
     organization_id: Optional[str] = Field(None, description="The unique identifier of the organization.")
     agent_id: Optional[str] = Field(None, description="The unique identifier of the agent.")
     model: Optional[str] = Field(None, description="The model used to make the function call.")
     name: Optional[str] = Field(None, description="The name of the participant.")
-    tool_calls: Optional[List[ToolCall]] = Field(None, description="The list of tool calls requested.")
+    tool_calls: Optional[List[OpenAIToolCall,]] = Field(None, description="The list of tool calls requested.")
     tool_call_id: Optional[str] = Field(None, description="The id of the tool call.")
     step_id: Optional[str] = Field(None, description="The id of the step that this message was created in.")
+
     # This overrides the optional base orm schema, created_at MUST exist on all messages objects
     created_at: datetime = Field(default_factory=get_utc_time, description="The timestamp when the object was created.")
 
@@ -109,6 +132,37 @@ class Message(BaseMessage):
         roles = ["system", "assistant", "user", "tool"]
         assert v in roles, f"Role must be one of {roles}"
         return v
+
+    @model_validator(mode="before")
+    @classmethod
+    def convert_from_orm(cls, data: Dict[str, Any]) -> Dict[str, Any]:
+        if isinstance(data, dict):
+            if "text" in data and "content" not in data:
+                data["content"] = [TextContent(text=data["text"])]
+                del data["text"]
+        return data
+
+    def model_dump(self, to_orm: bool = False, **kwargs) -> Dict[str, Any]:
+        data = super().model_dump(**kwargs)
+        if to_orm:
+            for content in data["content"]:
+                if content["type"] == "text":
+                    data["text"] = content["text"]
+            del data["content"]
+        return data
+
+    @property
+    def text(self) -> Optional[str]:
+        """
+        Retrieve the first text content's text.
+
+        Returns:
+            str: The text content, or None if no text content exists
+        """
+        if not self.content:
+            return None
+        text_content = [content.text for content in self.content if content.type == MessageContentType.text]
+        return text_content[0] if text_content else None
 
     def to_json(self):
         json_message = vars(self)
@@ -157,7 +211,7 @@ class Message(BaseMessage):
                             AssistantMessage(
                                 id=self.id,
                                 date=self.created_at,
-                                assistant_message=message_string,
+                                content=message_string,
                             )
                         )
                     else:
@@ -165,7 +219,7 @@ class Message(BaseMessage):
                             ToolCallMessage(
                                 id=self.id,
                                 date=self.created_at,
-                                tool_call=LettaToolCall(
+                                tool_call=ToolCall(
                                     name=tool_call.function.name,
                                     arguments=tool_call.function.arguments,
                                     tool_call_id=tool_call.id,
@@ -213,7 +267,7 @@ class Message(BaseMessage):
                 UserMessage(
                     id=self.id,
                     date=self.created_at,
-                    message=self.text,
+                    content=self.text,
                 )
             )
         elif self.role == MessageRole.system:
@@ -223,7 +277,7 @@ class Message(BaseMessage):
                 SystemMessage(
                     id=self.id,
                     date=self.created_at,
-                    message=self.text,
+                    content=self.text,
                 )
             )
         else:
@@ -275,7 +329,7 @@ class Message(BaseMessage):
                     model=model,
                     # standard fields expected in an OpenAI ChatCompletion message object
                     role=MessageRole.tool,  # NOTE
-                    text=openai_message_dict["content"],
+                    content=[TextContent(text=openai_message_dict["content"])],
                     name=openai_message_dict["name"] if "name" in openai_message_dict else None,
                     tool_calls=openai_message_dict["tool_calls"] if "tool_calls" in openai_message_dict else None,
                     tool_call_id=openai_message_dict["tool_call_id"] if "tool_call_id" in openai_message_dict else None,
@@ -288,7 +342,7 @@ class Message(BaseMessage):
                     model=model,
                     # standard fields expected in an OpenAI ChatCompletion message object
                     role=MessageRole.tool,  # NOTE
-                    text=openai_message_dict["content"],
+                    content=[TextContent(text=openai_message_dict["content"])],
                     name=openai_message_dict["name"] if "name" in openai_message_dict else None,
                     tool_calls=openai_message_dict["tool_calls"] if "tool_calls" in openai_message_dict else None,
                     tool_call_id=openai_message_dict["tool_call_id"] if "tool_call_id" in openai_message_dict else None,
@@ -304,10 +358,10 @@ class Message(BaseMessage):
             # Convert a function_call (from an assistant message) into a tool_call
             # NOTE: this does not conventionally include a tool_call_id (ToolCall.id), it's on the caster to provide it
             tool_calls = [
-                ToolCall(
+                OpenAIToolCall(
                     id=openai_message_dict["tool_call_id"],  # NOTE: unconventional source, not to spec
                     type="function",
-                    function=ToolCallFunction(
+                    function=OpenAIFunction(
                         name=openai_message_dict["function_call"]["name"],
                         arguments=openai_message_dict["function_call"]["arguments"],
                     ),
@@ -320,7 +374,7 @@ class Message(BaseMessage):
                     model=model,
                     # standard fields expected in an OpenAI ChatCompletion message object
                     role=MessageRole(openai_message_dict["role"]),
-                    text=openai_message_dict["content"],
+                    content=[TextContent(text=openai_message_dict["content"])],
                     name=openai_message_dict["name"] if "name" in openai_message_dict else None,
                     tool_calls=tool_calls,
                     tool_call_id=None,  # NOTE: None, since this field is only non-null for role=='tool'
@@ -333,7 +387,7 @@ class Message(BaseMessage):
                     model=model,
                     # standard fields expected in an OpenAI ChatCompletion message object
                     role=MessageRole(openai_message_dict["role"]),
-                    text=openai_message_dict["content"],
+                    content=[TextContent(text=openai_message_dict["content"])],
                     name=openai_message_dict["name"] if "name" in openai_message_dict else None,
                     tool_calls=tool_calls,
                     tool_call_id=None,  # NOTE: None, since this field is only non-null for role=='tool'
@@ -352,7 +406,7 @@ class Message(BaseMessage):
                 assert openai_message_dict["role"] == "assistant", openai_message_dict
 
                 tool_calls = [
-                    ToolCall(id=tool_call["id"], type=tool_call["type"], function=tool_call["function"])
+                    OpenAIToolCall(id=tool_call["id"], type=tool_call["type"], function=tool_call["function"])
                     for tool_call in openai_message_dict["tool_calls"]
                 ]
             else:
@@ -365,7 +419,7 @@ class Message(BaseMessage):
                     model=model,
                     # standard fields expected in an OpenAI ChatCompletion message object
                     role=MessageRole(openai_message_dict["role"]),
-                    text=openai_message_dict["content"],
+                    content=[TextContent(text=openai_message_dict["content"])],
                     name=openai_message_dict["name"] if "name" in openai_message_dict else None,
                     tool_calls=tool_calls,
                     tool_call_id=openai_message_dict["tool_call_id"] if "tool_call_id" in openai_message_dict else None,
@@ -378,7 +432,7 @@ class Message(BaseMessage):
                     model=model,
                     # standard fields expected in an OpenAI ChatCompletion message object
                     role=MessageRole(openai_message_dict["role"]),
-                    text=openai_message_dict["content"],
+                    content=[TextContent(text=openai_message_dict["content"] or "")],
                     name=openai_message_dict["name"] if "name" in openai_message_dict else None,
                     tool_calls=tool_calls,
                     tool_call_id=openai_message_dict["tool_call_id"] if "tool_call_id" in openai_message_dict else None,

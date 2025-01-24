@@ -12,7 +12,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
 
 from letta.__init__ import __version__
-from letta.constants import ADMIN_PREFIX, API_PREFIX, OPENAI_API_PREFIX
+from letta.constants import ADMIN_PREFIX, API_PREFIX
 from letta.errors import BedrockPermissionError, LettaAgentNotFoundError, LettaUserNotFoundError
 from letta.log import get_logger
 from letta.orm.errors import DatabaseTimeoutError, ForeignKeyConstraintViolationError, NoResultFound, UniqueConstraintViolationError
@@ -22,8 +22,6 @@ from letta.server.constants import REST_DEFAULT_PORT
 # NOTE(charles): these are extra routes that are not part of v1 but we still need to mount to pass tests
 from letta.server.rest_api.auth.index import setup_auth_router  # TODO: probably remove right?
 from letta.server.rest_api.interface import StreamingServerInterface
-from letta.server.rest_api.routers.openai.assistants.assistants import router as openai_assistants_router
-from letta.server.rest_api.routers.openai.chat_completions.chat_completions import router as openai_chat_completions_router
 
 # from letta.orm.utilities import get_db_session  # TODO(ethan) reenable once we merge ORM
 from letta.server.rest_api.routers.v1 import ROUTERS as v1_routes
@@ -51,8 +49,11 @@ password = None
 #    #typer.secho(f"Generated admin server password for this session: {password}", fg=typer.colors.GREEN)
 
 import logging
+import platform
 
 from fastapi import FastAPI
+
+is_windows = platform.system() == "Windows"
 
 log = logging.getLogger("uvicorn")
 
@@ -62,20 +63,11 @@ def generate_openapi_schema(app: FastAPI):
     if not app.openapi_schema:
         app.openapi_schema = app.openapi()
 
-    openai_docs, letta_docs = [app.openapi_schema.copy() for _ in range(2)]
-
-    openai_docs["paths"] = {k: v for k, v in openai_docs["paths"].items() if k.startswith("/openai")}
-    openai_docs["info"]["title"] = "OpenAI Assistants API"
+    letta_docs = app.openapi_schema.copy()
     letta_docs["paths"] = {k: v for k, v in letta_docs["paths"].items() if not k.startswith("/openai")}
     letta_docs["info"]["title"] = "Letta API"
     letta_docs["components"]["schemas"]["LettaMessageUnion"] = create_letta_message_union_schema()
-
-    # Split the API docs into Letta API, and OpenAI Assistants compatible API
     for name, docs in [
-        (
-            "openai",
-            openai_docs,
-        ),
         (
             "letta",
             letta_docs,
@@ -249,10 +241,6 @@ def create_application() -> "FastAPI":
     app.include_router(users_router, prefix=ADMIN_PREFIX)
     app.include_router(organizations_router, prefix=ADMIN_PREFIX)
 
-    # openai
-    app.include_router(openai_assistants_router, prefix=OPENAI_API_PREFIX)
-    app.include_router(openai_chat_completions_router, prefix=OPENAI_API_PREFIX)
-
     # /api/auth endpoints
     app.include_router(setup_auth_router(server, interface, password), prefix=API_PREFIX)
 
@@ -300,8 +288,14 @@ def start_server(
             ssl_certfile="certs/localhost.pem",
         )
     else:
-        print(f"▶ Server running at: http://{host or 'localhost'}:{port or REST_DEFAULT_PORT}")
-        print(f"▶ View using ADE at: https://app.letta.com/development-servers/local/dashboard\n")
+        if is_windows:
+            # Windows doesn't those the fancy unicode characters
+            print(f"Server running at: http://{host or 'localhost'}:{port or REST_DEFAULT_PORT}")
+            print(f"View using ADE at: https://app.letta.com/development-servers/local/dashboard\n")
+        else:
+            print(f"▶ Server running at: http://{host or 'localhost'}:{port or REST_DEFAULT_PORT}")
+            print(f"▶ View using ADE at: https://app.letta.com/development-servers/local/dashboard\n")
+
         uvicorn.run(
             app,
             host=host or "localhost",

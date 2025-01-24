@@ -27,7 +27,7 @@ agent_state = client.agents.create(
         ),
     ],
     # LLM model & endpoint configuration
-    llm="openai/gpt-4",
+    model="openai/gpt-4",
     context_window_limit=8000,
     # embedding model & endpoint configuration (cannot be changed)
     embedding="openai/text-embedding-ada-002",
@@ -46,7 +46,7 @@ response = client.agents.messages.send(
     messages=[
         MessageCreate(
             role="user",
-            text="hello",
+            content="hello",
         )
     ],
 )
@@ -59,7 +59,7 @@ response = client.agents.messages.send(
     messages=[
         MessageCreate(
             role="system",
-            text="[system] user has logged in. send a friendly message.",
+            content="[system] user has logged in. send a friendly message.",
         )
     ],
 )
