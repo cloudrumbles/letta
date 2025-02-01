@@ -34,438 +34,86 @@ from letta.constants import (
     MAX_FILENAME_LENGTH,
     TOOL_CALL_ID_MAX_LEN,
 )
+from letta.data import ADJECTIVE_BANK, NOUN_BANK
 from letta.schemas.openai.chat_completion_response import ChatCompletionResponse
 
-DEBUG = False
-if "LOG_LEVEL" in os.environ:
-    if os.environ["LOG_LEVEL"] == "DEBUG":
-        DEBUG = True
+DEBUG = bool(os.environ.get("LOG_LEVEL") == "DEBUG")
 
 
-ADJECTIVE_BANK = [
-    "beautiful",
-    "gentle",
-    "angry",
-    "vivacious",
-    "grumpy",
-    "luxurious",
-    "fierce",
-    "delicate",
-    "fluffy",
-    "radiant",
-    "elated",
-    "magnificent",
-    "sassy",
-    "ecstatic",
-    "lustrous",
-    "gleaming",
-    "sorrowful",
-    "majestic",
-    "proud",
-    "dynamic",
-    "energetic",
-    "mysterious",
-    "loyal",
-    "brave",
-    "decisive",
-    "frosty",
-    "cheerful",
-    "adorable",
-    "melancholy",
-    "vibrant",
-    "elegant",
-    "gracious",
-    "inquisitive",
-    "opulent",
-    "peaceful",
-    "rebellious",
-    "scintillating",
-    "dazzling",
-    "whimsical",
-    "impeccable",
-    "meticulous",
-    "resilient",
-    "charming",
-    "vivacious",
-    "creative",
-    "intuitive",
-    "compassionate",
-    "innovative",
-    "enthusiastic",
-    "tremendous",
-    "effervescent",
-    "tenacious",
-    "fearless",
-    "sophisticated",
-    "witty",
-    "optimistic",
-    "exquisite",
-    "sincere",
-    "generous",
-    "kindhearted",
-    "serene",
-    "amiable",
-    "adventurous",
-    "bountiful",
-    "courageous",
-    "diligent",
-    "exotic",
-    "grateful",
-    "harmonious",
-    "imaginative",
-    "jubilant",
-    "keen",
-    "luminous",
-    "nurturing",
-    "outgoing",
-    "passionate",
-    "quaint",
-    "resourceful",
-    "sturdy",
-    "tactful",
-    "unassuming",
-    "versatile",
-    "wondrous",
-    "youthful",
-    "zealous",
-    "ardent",
-    "benevolent",
-    "capricious",
-    "dedicated",
-    "empathetic",
-    "fabulous",
-    "gregarious",
-    "humble",
-    "intriguing",
-    "jovial",
-    "kind",
-    "lovable",
-    "mindful",
-    "noble",
-    "original",
-    "pleasant",
-    "quixotic",
-    "reliable",
-    "spirited",
-    "tranquil",
-    "unique",
-    "venerable",
-    "warmhearted",
-    "xenodochial",
-    "yearning",
-    "zesty",
-    "amusing",
-    "blissful",
-    "calm",
-    "daring",
-    "enthusiastic",
-    "faithful",
-    "graceful",
-    "honest",
-    "incredible",
-    "joyful",
-    "kind",
-    "lovely",
-    "merry",
-    "noble",
-    "optimistic",
-    "peaceful",
-    "quirky",
-    "respectful",
-    "sweet",
-    "trustworthy",
-    "understanding",
-    "vibrant",
-    "witty",
-    "xenial",
-    "youthful",
-    "zealous",
-    "ambitious",
-    "brilliant",
-    "careful",
-    "devoted",
-    "energetic",
-    "friendly",
-    "glorious",
-    "humorous",
-    "intelligent",
-    "jovial",
-    "knowledgeable",
-    "loyal",
-    "modest",
-    "nice",
-    "obedient",
-    "patient",
-    "quiet",
-    "resilient",
-    "selfless",
-    "tolerant",
-    "unique",
-    "versatile",
-    "warm",
-    "xerothermic",
-    "yielding",
-    "zestful",
-    "amazing",
-    "bold",
-    "charming",
-    "determined",
-    "exciting",
-    "funny",
-    "happy",
-    "imaginative",
-    "jolly",
-    "keen",
-    "loving",
-    "magnificent",
-    "nifty",
-    "outstanding",
-    "polite",
-    "quick",
-    "reliable",
-    "sincere",
-    "thoughtful",
-    "unusual",
-    "valuable",
-    "wonderful",
-    "xenodochial",
-    "zealful",
-    "admirable",
-    "bright",
-    "clever",
-    "dedicated",
-    "extraordinary",
-    "generous",
-    "hardworking",
-    "inspiring",
-    "jubilant",
-    "kindhearted",
-    "lively",
-    "miraculous",
-    "neat",
-    "openminded",
-    "passionate",
-    "remarkable",
-    "stunning",
-    "truthful",
-    "upbeat",
-    "vivacious",
-    "welcoming",
-    "yare",
-    "zealous",
-]
+# Type validation helpers
+def is_optional_type(hint: Any) -> bool:
+    """Check if a type hint is an Optional type."""
+    if isinstance(hint, _GenericAlias):
+        return hint.__origin__ is Union and type(None) in hint.__args__
+    return False
 
-NOUN_BANK = [
-    "lizard",
-    "firefighter",
-    "banana",
-    "castle",
-    "dolphin",
-    "elephant",
-    "forest",
-    "giraffe",
-    "harbor",
-    "iceberg",
-    "jewelry",
-    "kangaroo",
-    "library",
-    "mountain",
-    "notebook",
-    "orchard",
-    "penguin",
-    "quilt",
-    "rainbow",
-    "squirrel",
-    "teapot",
-    "umbrella",
-    "volcano",
-    "waterfall",
-    "xylophone",
-    "yacht",
-    "zebra",
-    "apple",
-    "butterfly",
-    "caterpillar",
-    "dragonfly",
-    "elephant",
-    "flamingo",
-    "gorilla",
-    "hippopotamus",
-    "iguana",
-    "jellyfish",
-    "koala",
-    "lemur",
-    "mongoose",
-    "nighthawk",
-    "octopus",
-    "panda",
-    "quokka",
-    "rhinoceros",
-    "salamander",
-    "tortoise",
-    "unicorn",
-    "vulture",
-    "walrus",
-    "xenopus",
-    "yak",
-    "zebu",
-    "asteroid",
-    "balloon",
-    "compass",
-    "dinosaur",
-    "eagle",
-    "firefly",
-    "galaxy",
-    "hedgehog",
-    "island",
-    "jaguar",
-    "kettle",
-    "lion",
-    "mammoth",
-    "nucleus",
-    "owl",
-    "pumpkin",
-    "quasar",
-    "reindeer",
-    "snail",
-    "tiger",
-    "universe",
-    "vampire",
-    "wombat",
-    "xerus",
-    "yellowhammer",
-    "zeppelin",
-    "alligator",
-    "buffalo",
-    "cactus",
-    "donkey",
-    "emerald",
-    "falcon",
-    "gazelle",
-    "hamster",
-    "icicle",
-    "jackal",
-    "kitten",
-    "leopard",
-    "mushroom",
-    "narwhal",
-    "opossum",
-    "peacock",
-    "quail",
-    "rabbit",
-    "scorpion",
-    "toucan",
-    "urchin",
-    "viper",
-    "wolf",
-    "xray",
-    "yucca",
-    "zebu",
-    "acorn",
-    "biscuit",
-    "cupcake",
-    "daisy",
-    "eyeglasses",
-    "frisbee",
-    "goblin",
-    "hamburger",
-    "icicle",
-    "jackfruit",
-    "kaleidoscope",
-    "lighthouse",
-    "marshmallow",
-    "nectarine",
-    "obelisk",
-    "pancake",
-    "quicksand",
-    "raspberry",
-    "spinach",
-    "truffle",
-    "umbrella",
-    "volleyball",
-    "walnut",
-    "xylophonist",
-    "yogurt",
-    "zucchini",
-    "asterisk",
-    "blackberry",
-    "chimpanzee",
-    "dumpling",
-    "espresso",
-    "fireplace",
-    "gnome",
-    "hedgehog",
-    "illustration",
-    "jackhammer",
-    "kumquat",
-    "lemongrass",
-    "mandolin",
-    "nugget",
-    "ostrich",
-    "parakeet",
-    "quiche",
-    "racquet",
-    "seashell",
-    "tadpole",
-    "unicorn",
-    "vaccination",
-    "wolverine",
-    "xenophobia",
-    "yam",
-    "zeppelin",
-    "accordion",
-    "broccoli",
-    "carousel",
-    "daffodil",
-    "eggplant",
-    "flamingo",
-    "grapefruit",
-    "harpsichord",
-    "impression",
-    "jackrabbit",
-    "kitten",
-    "llama",
-    "mandarin",
-    "nachos",
-    "obelisk",
-    "papaya",
-    "quokka",
-    "rooster",
-    "sunflower",
-    "turnip",
-    "ukulele",
-    "viper",
-    "waffle",
-    "xylograph",
-    "yeti",
-    "zephyr",
-    "abacus",
-    "blueberry",
-    "crocodile",
-    "dandelion",
-    "echidna",
-    "fig",
-    "giraffe",
-    "hamster",
-    "iguana",
-    "jackal",
-    "kiwi",
-    "lobster",
-    "marmot",
-    "noodle",
-    "octopus",
-    "platypus",
-    "quail",
-    "raccoon",
-    "starfish",
-    "tulip",
-    "urchin",
-    "vampire",
-    "walrus",
-    "xylophone",
-    "yak",
-    "zebra",
-]
+
+def enforce_types(func: Callable) -> Callable:
+    """Decorator to enforce type hints on function arguments."""
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        hints = {k: v for k, v in get_type_hints(func).items() if k != "return"}
+        arg_names = inspect.getfullargspec(func).args
+        args_with_hints = dict(zip(arg_names[1:], args[1:]))  # Skip 'self'
+
+        def matches_type(value: Any, hint: Any) -> bool:
+            origin = get_origin(hint)
+            args = get_args(hint)
+
+            if origin is Union:
+                return any(matches_type(value, arg) for arg in args)
+            elif origin is list and isinstance(value, list):
+                element_type = args[0] if args else None
+                return all(isinstance(v, element_type) for v in value) if element_type else True
+            elif origin:
+                return isinstance(value, origin)
+            return isinstance(value, hint)
+
+        for arg_name, arg_value in {**args_with_hints, **kwargs}.items():
+            hint = hints.get(arg_name)
+            if hint and not matches_type(arg_value, hint):
+                raise ValueError(f"Argument {arg_name} does not match type {hint}; is {arg_value}")
+
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
+# URL helpers
+def smart_urljoin(base_url: str, relative_url: str) -> str:
+    """Join URLs properly by ensuring base_url ends with /."""
+    if not base_url.endswith("/"):
+        base_url += "/"
+    return urljoin(base_url, relative_url)
+
+
+def is_valid_url(url: str) -> bool:
+    """Check if a string is a valid URL."""
+    try:
+        result = urlparse(url)
+        return all([result.scheme, result.netloc])
+    except ValueError:
+        return False
+
+
+# DateTime helpers
+def is_utc_datetime(dt: datetime) -> bool:
+    """Check if a datetime object is in UTC timezone."""
+    return dt.tzinfo is not None and dt.tzinfo.utcoffset(dt) == timedelta(0)
+
+
+def get_utc_time() -> datetime:
+    """Get current UTC time."""
+    return datetime.now(timezone.utc)
+
+
+def get_local_time(timezone: str = "Asia/Singapore") -> str:
+    """Get formatted local time for specified timezone."""
+    current_time_utc = datetime.now(pytz.utc)
+    tz = pytz.timezone(timezone)
+    local_time = current_time_utc.astimezone(tz)
+    return local_time.strftime("%Y-%m-%d %I:%M:%S %p %Z%z").strip()
 
 
 def deduplicate(target_list: list) -> list:
@@ -477,17 +125,6 @@ def deduplicate(target_list: list) -> list:
             dedup_list.append(i)
 
     return dedup_list
-
-
-def smart_urljoin(base_url: str, relative_url: str) -> str:
-    """urljoin is stupid and wants a trailing / at the end of the endpoint address, or it will chop the suffix off"""
-    if not base_url.endswith("/"):
-        base_url += "/"
-    return urljoin(base_url, relative_url)
-
-
-def is_utc_datetime(dt: datetime) -> bool:
-    return dt.tzinfo is not None and dt.tzinfo.utcoffset(dt) == timedelta(0)
 
 
 def get_tool_call_id() -> str:
@@ -509,57 +146,6 @@ def assistant_function_to_tool(assistant_message: dict) -> dict:
         }
     ]
     return new_msg
-
-
-def is_optional_type(hint):
-    """Check if the type hint is an Optional type."""
-    if isinstance(hint, _GenericAlias):
-        return hint.__origin__ is Union and type(None) in hint.__args__
-    return False
-
-
-def enforce_types(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        # Get type hints, excluding the return type hint
-        hints = {k: v for k, v in get_type_hints(func).items() if k != "return"}
-
-        # Get the function's argument names
-        arg_names = inspect.getfullargspec(func).args
-
-        # Pair each argument with its corresponding type hint
-        args_with_hints = dict(zip(arg_names[1:], args[1:]))  # Skipping 'self'
-
-        # Function to check if a value matches a given type hint
-        def matches_type(value, hint):
-            origin = get_origin(hint)
-            args = get_args(hint)
-
-            if origin is Union:  # Handle Union types (including Optional)
-                return any(matches_type(value, arg) for arg in args)
-            elif origin is list and isinstance(value, list):  # Handle List[T]
-                element_type = args[0] if args else None
-                return all(isinstance(v, element_type) for v in value) if element_type else True
-            elif origin:  # Handle other generics like Dict, Tuple, etc.
-                return isinstance(value, origin)
-            else:  # Handle non-generic types
-                return isinstance(value, hint)
-
-        # Check types of arguments
-        for arg_name, arg_value in args_with_hints.items():
-            hint = hints.get(arg_name)
-            if hint and not matches_type(arg_value, hint):
-                raise ValueError(f"Argument {arg_name} does not match type {hint}; is {arg_value}")
-
-        # Check types of keyword arguments
-        for arg_name, arg_value in kwargs.items():
-            hint = hints.get(arg_name)
-            if hint and not matches_type(arg_value, hint):
-                raise ValueError(f"Argument {arg_name} does not match type {hint}; is {arg_value}")
-
-        return func(*args, **kwargs)
-
-    return wrapper
 
 
 def annotate_message_json_list_with_tool_calls(messages: List[dict], allow_tool_roles: bool = False):
@@ -704,7 +290,14 @@ def create_random_username() -> str:
 def verify_first_message_correctness(
     response: ChatCompletionResponse, require_send_message: bool = True, require_monologue: bool = False
 ) -> bool:
-    """Can be used to enforce that the first message always uses send_message"""
+    """
+    Enforce that the first message always uses send_message.
+
+    Args:
+        response: The chat completion response to verify
+        require_send_message: Whether to require send_message function
+        require_monologue: Whether to require internal monologue
+    """
     response_message = response.choices[0].message
 
     # First message should be a call to send_message with a non-empty content
@@ -731,16 +324,16 @@ def verify_first_message_correctness(
         return False
 
     if response_message.content:
-        ### Extras
         monologue = response_message.content
+        special_characters = '(){}[]"'  # Fix undefined variable
 
-        def contains_special_characters(s):
-            special_characters = '(){}[]"'
+        def contains_special_characters(s: str) -> bool:
             return any(char in s for char in special_characters)
 
         if contains_special_characters(monologue):
             printd(f"First message internal monologue contained special characters: {response_message}")
             return False
+
         # if 'functions' in monologue or 'send_message' in monologue or 'inner thought' in monologue.lower():
         if "functions" in monologue or "send_message" in monologue:
             # Sometimes the syntax won't be correct and internal syntax will leak into message.context
@@ -748,14 +341,6 @@ def verify_first_message_correctness(
             return False
 
     return True
-
-
-def is_valid_url(url):
-    try:
-        result = urlparse(url)
-        return all([result.scheme, result.netloc])
-    except ValueError:
-        return False
 
 
 @contextmanager
@@ -839,50 +424,11 @@ def timestamp_to_datetime(ts):
 
 
 def get_local_time_military():
-    # Get the current time in UTC
+    """Get the current time in military (24-hour) format."""
     current_time_utc = datetime.now(pytz.utc)
-
-    # Convert to San Francisco's time zone (PST/PDT)
     sf_time_zone = pytz.timezone("America/Los_Angeles")
     local_time = current_time_utc.astimezone(sf_time_zone)
-
-    # You may format it as you desire
-    formatted_time = local_time.strftime("%Y-%m-%d %H:%M:%S %Z%z")
-
-    return formatted_time
-
-
-def get_local_time_timezone(timezone="America/Los_Angeles"):
-    # Get the current time in UTC
-    current_time_utc = datetime.now(pytz.utc)
-
-    # Convert to San Francisco's time zone (PST/PDT)
-    sf_time_zone = pytz.timezone(timezone)
-    local_time = current_time_utc.astimezone(sf_time_zone)
-
-    # You may format it as you desire, including AM/PM
-    formatted_time = local_time.strftime("%Y-%m-%d %I:%M:%S %p %Z%z")
-
-    return formatted_time
-
-
-def get_local_time(timezone=None):
-    if timezone is not None:
-        time_str = get_local_time_timezone(timezone)
-    else:
-        # Get the current time, which will be in the local timezone of the computer
-        local_time = datetime.now().astimezone()
-
-        # You may format it as you desire, including AM/PM
-        time_str = local_time.strftime("%Y-%m-%d %I:%M:%S %p %Z%z")
-
-    return time_str.strip()
-
-
-def get_utc_time() -> datetime:
-    """Get the current UTC time"""
-    # return datetime.now(pytz.utc)
-    return datetime.now(timezone.utc)
+    return local_time.strftime("%Y-%m-%d %H:%M:%S %Z%z")
 
 
 def format_datetime(dt):
@@ -1075,7 +621,7 @@ def json_dumps(data, indent=2):
     def safe_serializer(obj):
         if isinstance(obj, datetime):
             return obj.isoformat()
-        raise TypeError(f"Type {type(obj)} not serializable")
+        raise TypeError(f"Type {obj} not serializable")
 
     return json.dumps(data, indent=indent, default=safe_serializer, ensure_ascii=False)
 

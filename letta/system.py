@@ -1,7 +1,6 @@
-import json
 import uuid
+from typing import Dict, List, Optional
 import warnings
-from typing import Optional
 
 from .constants import (
     INITIAL_BOOT_MESSAGE,
@@ -12,67 +11,38 @@ from .constants import (
 from .utils import get_local_time, json_dumps
 
 
-def get_initial_boot_messages(version="startup"):
+def get_initial_boot_messages(version: str = "startup") -> List[Dict]:
+    """Get initial boot messages based on specified version.
+
+    Args:
+        version: Boot message version ("startup", "startup_with_send_message", or "startup_with_send_message_gpt35")
+
+    Returns:
+        List of message dictionaries
+    """
     if version == "startup":
-        initial_boot_message = INITIAL_BOOT_MESSAGE
-        messages = [
-            {"role": "assistant", "content": initial_boot_message},
+        return [
+            {"role": "assistant", "content": INITIAL_BOOT_MESSAGE},
         ]
 
     elif version == "startup_with_send_message":
         tool_call_id = str(uuid.uuid4())
-        messages = [
-            # first message includes both inner monologue and function call to send_message
+        return [
             {
                 "role": "assistant",
                 "content": INITIAL_BOOT_MESSAGE_SEND_MESSAGE_THOUGHT,
-                # "function_call": {
-                #     "name": "send_message",
-                #     "arguments": '{\n  "message": "' + f"{INITIAL_BOOT_MESSAGE_SEND_MESSAGE_FIRST_MSG}" + '"\n}',
-                # },
                 "tool_calls": [
                     {
                         "id": tool_call_id,
                         "type": "function",
                         "function": {
                             "name": "send_message",
-                            "arguments": '{\n  "message": "' + f"{INITIAL_BOOT_MESSAGE_SEND_MESSAGE_FIRST_MSG}" + '"\n}',
+                            "arguments": json_dumps({"message": INITIAL_BOOT_MESSAGE_SEND_MESSAGE_FIRST_MSG}),
                         },
                     }
                 ],
             },
-            # obligatory function return message
             {
-                # "role": "function",
-                "role": "tool",
-                "name": "send_message",  # NOTE: technically not up to spec, this is old functions style
-                "content": package_function_response(True, None),
-                "tool_call_id": tool_call_id,
-            },
-        ]
-
-    elif version == "startup_with_send_message_gpt35":
-        tool_call_id = str(uuid.uuid4())
-        messages = [
-            # first message includes both inner monologue and function call to send_message
-            {
-                "role": "assistant",
-                "content": "*inner thoughts* Still waiting on the user. Sending a message with function.",
-                # "function_call": {"name": "send_message", "arguments": '{\n  "message": "' + f"Hi, is anyone there?" + '"\n}'},
-                "tool_calls": [
-                    {
-                        "id": tool_call_id,
-                        "type": "function",
-                        "function": {
-                            "name": "send_message",
-                            "arguments": '{\n  "message": "' + f"Hi, is anyone there?" + '"\n}',
-                        },
-                    }
-                ],
-            },
-            # obligatory function return message
-            {
-                # "role": "function",
                 "role": "tool",
                 "name": "send_message",
                 "content": package_function_response(True, None),
@@ -80,19 +50,41 @@ def get_initial_boot_messages(version="startup"):
             },
         ]
 
-    else:
-        raise ValueError(version)
+    elif version == "startup_with_send_message_gpt35":
+        tool_call_id = str(uuid.uuid4())
+        return [
+            {
+                "role": "assistant",
+                "content": "*inner thoughts* Still waiting on the user. Sending a message with function.",
+                "tool_calls": [
+                    {
+                        "id": tool_call_id,
+                        "type": "function",
+                        "function": {
+                            "name": "send_message",
+                            "arguments": json_dumps({"message": "Hi, is anyone there?"}),
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "name": "send_message",
+                "content": package_function_response(True, None),
+                "tool_call_id": tool_call_id,
+            },
+        ]
 
-    return messages
+    raise ValueError(f"Unknown boot message version: {version}")
 
 
-def get_heartbeat(reason="Automated timer", include_location=False, location_name="San Francisco, CA, USA"):
-    # Package the message with time and location
-    formatted_time = get_local_time()
+# System event packaging functions
+def get_heartbeat(reason: str = "Automated timer", include_location: bool = False, location_name: str = "San Francisco, CA, USA") -> str:
+    """Package a heartbeat event message."""
     packaged_message = {
         "type": "heartbeat",
         "reason": reason,
-        "time": formatted_time,
+        "time": get_local_time(),
     }
 
     if include_location:
@@ -101,13 +93,14 @@ def get_heartbeat(reason="Automated timer", include_location=False, location_nam
     return json_dumps(packaged_message)
 
 
-def get_login_event(last_login="Never (first login)", include_location=False, location_name="San Francisco, CA, USA"):
-    # Package the message with time and location
-    formatted_time = get_local_time()
+def get_login_event(
+    last_login: str = "Never (first login)", include_location: bool = False, location_name: str = "San Francisco, CA, USA"
+) -> str:
+    """Package a login event message."""
     packaged_message = {
         "type": "login",
         "last_login": last_login,
-        "time": formatted_time,
+        "time": get_local_time(),
     }
 
     if include_location:
@@ -116,19 +109,19 @@ def get_login_event(last_login="Never (first login)", include_location=False, lo
     return json_dumps(packaged_message)
 
 
+# Message packaging functions
 def package_user_message(
     user_message: str,
     time: Optional[str] = None,
     include_location: bool = False,
-    location_name: Optional[str] = "San Francisco, CA, USA",
+    location_name: str = "San Francisco, CA, USA",
     name: Optional[str] = None,
-):
-    # Package the message with time and location
-    formatted_time = time if time else get_local_time()
+) -> str:
+    """Package a user message with metadata."""
     packaged_message = {
         "type": "user_message",
         "message": user_message,
-        "time": formatted_time,
+        "time": time if time else get_local_time(),
     }
 
     if include_location:
@@ -140,15 +133,15 @@ def package_user_message(
     return json_dumps(packaged_message)
 
 
-def package_function_response(was_success, response_string, timestamp=None):
-    formatted_time = get_local_time() if timestamp is None else timestamp
-    packaged_message = {
-        "status": "OK" if was_success else "Failed",
-        "message": response_string,
-        "time": formatted_time,
-    }
-
-    return json_dumps(packaged_message)
+def package_function_response(was_success: bool, response_string: Optional[str], timestamp: Optional[str] = None) -> str:
+    """Package a function response with status and timestamp."""
+    return json_dumps(
+        {
+            "status": "OK" if was_success else "Failed",
+            "message": response_string,
+            "time": timestamp if timestamp else get_local_time(),
+        }
+    )
 
 
 def package_system_message(system_message, message_type="system_alert", time=None):
@@ -168,42 +161,44 @@ def package_system_message(system_message, message_type="system_alert", time=Non
         "time": formatted_time,
     }
 
-    return json.dumps(packaged_message)
 
 
-def package_summarize_message(summary, summary_message_count, hidden_message_count, total_message_count, timestamp=None):
+# Summary message packaging
+def package_summarize_message(
+    summary: str, summary_message_count: int, hidden_message_count: int, total_message_count: int, timestamp: Optional[str] = None
+) -> str:
+    """Package a conversation summary message."""
     context_message = (
         f"Note: prior messages ({hidden_message_count} of {total_message_count} total messages) have been hidden from view due to conversation memory constraints.\n"
         + f"The following is a summary of the previous {summary_message_count} messages:\n {summary}"
     )
 
-    formatted_time = get_local_time() if timestamp is None else timestamp
-    packaged_message = {
-        "type": "system_alert",
-        "message": context_message,
-        "time": formatted_time,
-    }
+    return json_dumps(
+        {
+            "type": "system_alert",
+            "message": context_message,
+            "time": timestamp if timestamp else get_local_time(),
+        }
+    )
 
-    return json_dumps(packaged_message)
 
-
-def package_summarize_message_no_summary(hidden_message_count, timestamp=None, message=None):
-    """Add useful metadata to the summary message"""
-
-    # Package the message with time and location
-    formatted_time = get_local_time() if timestamp is None else timestamp
+def package_summarize_message_no_summary(hidden_message_count: int, timestamp: Optional[str] = None, message: Optional[str] = None) -> str:
+    """Package a message indicating hidden messages without summary."""
     context_message = (
         message
         if message
-        else f"Note: {hidden_message_count} prior messages with the user have been hidden from view due to conversation memory constraints. Older messages are stored in Recall Memory and can be viewed using functions."
+        else f"Note: {hidden_message_count} prior messages with the user have been hidden from view due to conversation memory constraints. "
+        "Older messages are stored in Recall Memory and can be viewed using functions."
     )
-    packaged_message = {
-        "type": "system_alert",
-        "message": context_message,
-        "time": formatted_time,
-    }
 
-    return json_dumps(packaged_message)
+    return json_dumps(
+        {
+            "type": "system_alert",
+            "message": context_message,
+            "time": timestamp if timestamp else get_local_time(),
+        }
+    )
+
 
 
 def get_token_limit_warning():
