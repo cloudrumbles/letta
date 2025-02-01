@@ -122,8 +122,8 @@ class Agent(BaseAgent):
                 if not isinstance(rule, TerminalToolRule):
                     warnings.warn("Tool rules only work reliably for the latest OpenAI " "models that support structured outputs.")
                     break
-        else:
-            self.agent_state.tool_rules = []
+
+        self.tool_rules_solver = ToolRulesSolver(tool_rules=agent_state.tool_rules)
 
         self.tool_rules_solver: ToolRulesSolver = ToolRulesSolver(tool_rules=self.agent_state.tool_rules)
         self.model = self.agent_state.llm_config.model
@@ -286,6 +286,7 @@ class Agent(BaseAgent):
                 # CHANGED: skipping deep copy for performance
                 agent_state_copy = self.agent_state.__copy__()
                 agent_state_copy.tools = []
+                agent_state_copy.tool_rules = []
 
                 sandbox_res = ToolExecutionSandbox(
                     function_name,
@@ -499,10 +500,20 @@ class Agent(BaseAgent):
             if "inner_thoughts" in function_args:
                 response_message.content = function_args.pop("inner_thoughts")
 
-            if response_message.content and not nonnull_content:
-                self.interface.internal_monologue(
-                    response_message.content,
-                    msg_obj=messages[-1],
+            # (Still parsing function args)
+            # Handle requests for immediate heartbeat
+            heartbeat_request = function_args.pop("request_heartbeat", None)
+
+            # Edge case: heartbeat_request is returned as a stringified boolean, we will attempt to parse:
+            if isinstance(heartbeat_request, str) and heartbeat_request.lower().strip() == "true":
+                heartbeat_request = True
+
+            if heartbeat_request is None:
+                heartbeat_request = False
+
+            if not isinstance(heartbeat_request, bool):
+                self.logger.warning(
+                    f"{CLI_WARNING_PREFIX}'request_heartbeat' arg parsed was not a bool or None, type={type(heartbeat_request)}, value={heartbeat_request}"
                 )
 
             heartbeat_request = bool(function_args.pop("request_heartbeat", 0))
@@ -772,9 +783,16 @@ class Agent(BaseAgent):
             )
             response_msg = response.choices[0].message
 
-            # 3,4,5. handle function calls vs normal text
-            new_msgs, heartbeat_req, function_failed = self._handle_ai_response(
-                response_message=response_msg,
+            # Step 3: check if LLM wanted to call a function
+            # (if yes) Step 4: call the function
+            # (if yes) Step 5: send the info on the function call and function response to LLM
+            response_message = response.choices[0].message
+
+            response_message.model_copy()  # TODO why are we copying here?
+            all_response_messages, heartbeat_request, function_failed = self._handle_ai_response(
+                response_message,
+                # TODO this is kind of hacky, find a better way to handle this
+                # the only time we set up message creation ahead of time is when streaming is on
                 response_message_id=response.id if stream else None,
             )
 
