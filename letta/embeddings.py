@@ -187,6 +187,31 @@ class GoogleEmbeddings:
         response_json = response.json()
         return response_json["embedding"]["values"]
 
+class VoyageEmbeddings:
+    def __init__(self, model: str, base_url: str, api_key: str):
+        self.model = model
+        self.base_url = base_url
+        self.api_key = api_key
+    def get_text_embedding(self, text: str) -> List[float]:
+        import httpx
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}"
+        }
+        json_data = {
+            "model": self.model,
+            "input": text,
+        }
+        with httpx.Client() as client:
+            response = client.post(
+                f"{self.base_url}/embeddings", 
+                headers=headers,
+                json=json_data,
+            )
+        if response.status_code != 200:
+            raise Exception(f"Error from Voyage API: {response.text}")
+        response_json = response.json()
+        return response_json["data"][0]["embedding"]
 
 def query_embedding(embedding_model, query_text: str):
     """Generate padded embedding for querying database"""

@@ -89,6 +89,9 @@ class ModelSettings(BaseSettings):
     # together
     together_api_key: Optional[str] = None
 
+    # voyage
+    voyage_api_key: Optional[str] = None
+
     # vLLM
     vllm_api_base: Optional[str] = None
 
