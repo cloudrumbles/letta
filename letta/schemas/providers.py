@@ -211,6 +211,75 @@ class OpenAIProvider(Provider):
             return None
 
 
+class DeepSeekProvider(OpenAIProvider):
+    """
+    DeepSeek ChatCompletions API is similar to OpenAI's reasoning API,
+    but with slight differences:
+    * For example, DeepSeek's API requires perfect interleaving of user/assistant
+    * It also does not support native function calling
+    """
+
+    name: str = "deepseek"
+    base_url: str = Field("https://api.deepseek.com/v1", description="Base URL for the DeepSeek API.")
+    api_key: str = Field(..., description="API key for the DeepSeek API.")
+
+    def get_model_context_window_size(self, model_name: str) -> Optional[int]:
+        # DeepSeek doesn't return context window in the model listing,
+        # so these are hardcoded from their website
+        if model_name == "deepseek-reasoner":
+            return 64000
+        elif model_name == "deepseek-chat":
+            return 64000
+        else:
+            return None
+
+    def list_llm_models(self) -> List[LLMConfig]:
+        from letta.llm_api.openai import openai_get_model_list
+
+        response = openai_get_model_list(self.base_url, api_key=self.api_key)
+
+        if "data" in response:
+            data = response["data"]
+        else:
+            data = response
+
+        configs = []
+        for model in data:
+            assert "id" in model, f"DeepSeek model missing 'id' field: {model}"
+            model_name = model["id"]
+
+            # In case DeepSeek starts supporting it in the future:
+            if "context_length" in model:
+                # Context length is returned in OpenRouter as "context_length"
+                context_window_size = model["context_length"]
+            else:
+                context_window_size = self.get_model_context_window_size(model_name)
+
+            if not context_window_size:
+                warnings.warn(f"Couldn't find context window size for model {model_name}")
+                continue
+
+            # Not used for deepseek-reasoner, but otherwise is true
+            put_inner_thoughts_in_kwargs = False if model_name == "deepseek-reasoner" else True
+
+            configs.append(
+                LLMConfig(
+                    model=model_name,
+                    model_endpoint_type="deepseek",
+                    model_endpoint=self.base_url,
+                    context_window=context_window_size,
+                    handle=self.get_handle(model_name),
+                    put_inner_thoughts_in_kwargs=put_inner_thoughts_in_kwargs,
+                )
+            )
+
+        return configs
+
+    def list_embedding_models(self) -> List[EmbeddingConfig]:
+        # No embeddings supported
+        return []
+
+
 class LMStudioOpenAIProvider(OpenAIProvider):
     name: str = "lmstudio-openai"
     base_url: str = Field(..., description="Base URL for the LMStudio OpenAI API.")
@@ -327,7 +396,7 @@ class LMStudioOpenAIProvider(OpenAIProvider):
                     embedding_endpoint_type="openai",
                     embedding_endpoint=self.base_url,
                     embedding_dim=context_window_size,
-                    embedding_chunk_size=300,
+                    embedding_chunk_size=300,  # NOTE: max is 2048
                     handle=self.get_handle(model_name),
                 ),
             )
@@ -341,12 +410,51 @@ class AnthropicProvider(Provider):
     base_url: str = "https://api.anthropic.com/v1"
 
     def list_llm_models(self) -> List[LLMConfig]:
-        from letta.llm_api.anthropic import anthropic_get_model_list
+        from letta.llm_api.anthropic import MODEL_LIST, anthropic_get_model_list
 
         models = anthropic_get_model_list(self.base_url, api_key=self.api_key)
 
+        """
+        Example response:
+        {
+          "data": [
+            {
+              "type": "model",
+              "id": "claude-3-5-sonnet-20241022",
+              "display_name": "Claude 3.5 Sonnet (New)",
+              "created_at": "2024-10-22T00:00:00Z"
+            }
+          ],
+          "has_more": true,
+          "first_id": "<string>",
+          "last_id": "<string>"
+        }
+        """
+
         configs = []
         for model in models:
+
+            if model["type"] != "model":
+                continue
+
+            if "id" not in model:
+                continue
+
+            # Don't support 2.0 and 2.1
+            if model["id"].startswith("claude-2"):
+                continue
+
+            # Anthropic doesn't return the context window in their API
+            if "context_window" not in model:
+                # Remap list to name: context_window
+                model_library = {m["name"]: m["context_window"] for m in MODEL_LIST}
+                # Attempt to look it up in a hardcoded list
+                if model["id"] in model_library:
+                    model["context_window"] = model_library[model["id"]]
+                else:
+                    # On fallback, we can set 200k (generally safe), but we should warn the user
+                    warnings.warn(f"Couldn't find context window size for model {model['id']}, defaulting to 200,000")
+                    model["context_window"] = 200000
 
             # We set this to false by default, because Anthropic can
             # natively support <thinking> tags inside of content fields
@@ -354,15 +462,15 @@ class AnthropicProvider(Provider):
             # reliable for tool calling (no chance of a non-tool call step)
             # Since tool_choice_type 'any' doesn't work with in-content COT
             # NOTE For Haiku, it can be flaky if we don't enable this by default
-            inner_thoughts_in_kwargs = True if "haiku" in model["name"] else False
+            inner_thoughts_in_kwargs = True if "haiku" in model["id"] else False
 
             configs.append(
                 LLMConfig(
-                    model=model["name"],
+                    model=model["id"],
                     model_endpoint_type="anthropic",
                     model_endpoint=self.base_url,
                     context_window=model["context_window"],
-                    handle=self.get_handle(model["name"]),
+                    handle=self.get_handle(model["id"]),
                     put_inner_thoughts_in_kwargs=inner_thoughts_in_kwargs,
                 )
             )
@@ -737,6 +845,45 @@ class GoogleAIProvider(Provider):
         return google_ai_get_model_context_window(self.base_url, self.api_key, model_name)
 
 
+class GoogleVertexProvider(Provider):
+    name: str = "google_vertex"
+    google_cloud_project: str = Field(..., description="GCP project ID for the Google Vertex API.")
+    google_cloud_location: str = Field(..., description="GCP region for the Google Vertex API.")
+
+    def list_llm_models(self) -> List[LLMConfig]:
+        from letta.llm_api.google_constants import GOOGLE_MODEL_TO_CONTEXT_LENGTH
+
+        configs = []
+        for model, context_length in GOOGLE_MODEL_TO_CONTEXT_LENGTH.items():
+            configs.append(
+                LLMConfig(
+                    model=model,
+                    model_endpoint_type="google_vertex",
+                    model_endpoint=f"https://{self.google_cloud_location}-aiplatform.googleapis.com/v1/projects/{self.google_cloud_project}/locations/{self.google_cloud_location}",
+                    context_window=context_length,
+                    handle=self.get_handle(model),
+                )
+            )
+        return configs
+
+    def list_embedding_models(self) -> List[EmbeddingConfig]:
+        from letta.llm_api.google_constants import GOOGLE_EMBEDING_MODEL_TO_DIM
+
+        configs = []
+        for model, dim in GOOGLE_EMBEDING_MODEL_TO_DIM.items():
+            configs.append(
+                EmbeddingConfig(
+                    embedding_model=model,
+                    embedding_endpoint_type="google_vertex",
+                    embedding_endpoint=f"https://{self.google_cloud_location}-aiplatform.googleapis.com/v1/projects/{self.google_cloud_project}/locations/{self.google_cloud_location}",
+                    embedding_dim=dim,
+                    embedding_chunk_size=300,  # NOTE: max is 2048
+                    handle=self.get_handle(model, is_embedding=True),
+                )
+            )
+        return configs
+
+
 class AzureProvider(Provider):
     name: str = "azure"
     latest_api_version: str = "2024-09-01-preview"  # https://learn.microsoft.com/en-us/azure/ai-services/openai/api-version-deprecation
@@ -792,8 +939,8 @@ class AzureProvider(Provider):
                     embedding_endpoint=model_endpoint,
                     embedding_dim=768,
                     embedding_chunk_size=300,  # NOTE: max is 2048
-                    handle=self.get_handle(model_name, is_embedding=True),
-                )
+                    handle=self.get_handle(model_name),
+                ),
             )
         return configs
 
@@ -951,4 +1098,6 @@ class AnthropicBedrockProvider(Provider):
         return bedrock_get_model_context_window(model_name)
 
     def get_handle(self, model_name: str) -> str:
-        return f"anthropic/{model_name}"
+        print(model_name)
+        model = model_name.split(".")[-1]
+        return f"bedrock/{model}"

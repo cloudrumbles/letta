@@ -25,6 +25,7 @@ class LLMConfig(BaseModel):
         "anthropic",
         "cohere",
         "google_ai",
+        "google_vertex",
         "azure",
         "groq",
         "ollama",
@@ -32,6 +33,7 @@ class LLMConfig(BaseModel):
         "webui-legacy",
         "lmstudio",
         "lmstudio-legacy",
+        "lmstudio-chatcompletions",
         "llamacpp",
         "koboldcpp",
         "vllm",
@@ -39,6 +41,7 @@ class LLMConfig(BaseModel):
         "mistral",
         "together",  # completions endpoint
         "bedrock",
+        "deepseek",
     ] = Field(..., description="The endpoint type for the model.")
     model_endpoint: Optional[str] = Field(None, description="The endpoint for the model.")
     model_wrapper: Optional[str] = Field(None, description="The wrapper for the model.")
