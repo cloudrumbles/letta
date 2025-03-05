@@ -2,7 +2,7 @@ import os
 from logging import CRITICAL, DEBUG, ERROR, INFO, NOTSET, WARN, WARNING
 
 LETTA_DIR = os.path.join(os.path.expanduser("~"), ".letta")
-LETTA_DIR_TOOL_SANDBOX = os.path.join(LETTA_DIR, "tool_sandbox_dir")
+LETTA_TOOL_EXECUTION_DIR = os.path.join(LETTA_DIR, "tool_execution_dir")
 
 ADMIN_PREFIX = "/v1/admin"
 API_PREFIX = "/v1"
@@ -27,7 +27,6 @@ TOOL_CALL_ID_MAX_LEN = 29
 
 # minimum context window size
 MIN_CONTEXT_WINDOW = 4096
-DEFAULT_CONTEXT_WINDOW_SIZE = 32000
 
 # embeddings
 MAX_EMBEDDING_DIM = 4096  # maximum supported embeding size - do NOT change or else DBs will need to be reset
@@ -96,6 +95,9 @@ LLM_MAX_TOKENS = {
     "deepseek-chat": 64000,
     "deepseek-reasoner": 64000,
     ## OpenAI models: https://platform.openai.com/docs/models/overview
+    # gpt-4.5-preview
+    "gpt-4.5-preview": 128000,
+    "gpt-4.5-preview-2025-02-27": 128000,
     # "o1-preview
     "chatgpt-4o-latest": 128000,
     # "o1-preview-2024-09-12
@@ -143,6 +145,9 @@ MESSAGE_SUMMARY_WARNING_STR = " ".join(
         "If there is any important new information or general memories about you or the user that you would like to save, you should save that information immediately by calling function core_memory_append, core_memory_replace, or archival_memory_insert.",
         # "Remember to pass request_heartbeat = true if you would like to send a message immediately after.",
     ]
+)
+DATA_SOURCE_ATTACH_ALERT = (
+    "[ALERT] New data was just uploaded to archival memory. You can view this data by calling the archival_memory_search tool."
 )
 
 # The ackknowledgement message used in the summarize sequence
